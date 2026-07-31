@@ -1,1 +1,2 @@
 mcp>=2.0.0
+customtkinter>=5.2.0
