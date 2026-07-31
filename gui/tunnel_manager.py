@@ -1,197 +1,106 @@
-"""tunnel-client 外部安装：仅路径检测、profile、doctor、启停。"""
-
 from __future__ import annotations
 
-import json
 import os
+import shlex
+import shutil
 import subprocess
-from dataclasses import asdict, dataclass
+import sys
 from pathlib import Path
-from typing import Callable
 
-from gui.config import AppConfig, PROJECT_ROOT
+from gui.config import AppConfig
+from gui.process_manager import ProcessManager
 
-TUNNEL_DATA_DIR = PROJECT_ROOT / "data" / "tunnel"
-TUNNEL_PROFILE_DIR = TUNNEL_DATA_DIR / "profiles"
-TUNNEL_STATE_FILE = TUNNEL_DATA_DIR / "state.json"
-
-
-@dataclass
-class TunnelState:
-    profile_initialized: bool = False
-    last_doctor_ok: bool = False
-    last_doctor_at: int = 0
-    last_error: str = ""
-
-
-@dataclass
-class TunnelStatus:
-    executable: str
-    version: str
-    installed: bool
-    profile_dir: str
-    profile_initialized: bool
-    profiles: list[str]
-    state: TunnelState
+ROOT = Path(__file__).resolve().parents[1]
+LAUNCHER = ROOT / "launch_mcp.py"
 
 
 class TunnelManager:
-    def __init__(self, on_log: Callable[[str], None] | None = None) -> None:
-        self.on_log = on_log
-        TUNNEL_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    def __init__(self, processes: ProcessManager) -> None:
+        self.processes = processes
 
-    def _log(self, msg: str) -> None:
-        if self.on_log:
-            self.on_log(msg)
+    @staticmethod
+    def resolve_executable(config: AppConfig) -> str:
+        raw = config.tunnel_client_path.strip() or "tunnel-client"
+        expanded = str(Path(raw).expanduser()) if raw not in {"tunnel-client"} else raw
+        resolved = shutil.which(expanded)
+        if resolved:
+            return resolved
+        candidate = Path(expanded)
+        if candidate.is_file():
+            return str(candidate.resolve())
+        raise FileNotFoundError("tunnel-client executable was not found")
 
-    def resolve_executable(self, config: AppConfig) -> Path:
-        if not config.tunnel_client_path.strip():
-            raise FileNotFoundError("请指定 tunnel-client 可执行文件路径")
-        path = Path(config.tunnel_client_path.strip())
-        if not path.exists():
-            raise FileNotFoundError(f"tunnel-client 路径不存在: {path}")
-        return path
+    def version(self, config: AppConfig) -> str:
+        executable = self.resolve_executable(config)
+        result = subprocess.run(
+            [executable, "--version"], text=True, capture_output=True,
+            timeout=10, check=False, shell=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "failed to read tunnel-client version")
+        return result.stdout.strip() or result.stderr.strip() or executable
 
-    def api_key(self, config: AppConfig) -> str:
-        return config.control_plane_api_key.strip() or os.environ.get("CONTROL_PLANE_API_KEY", "").strip()
-
-    def tunnel_env(self, config: AppConfig) -> dict[str, str]:
-        env = {"TUNNEL_CLIENT_PROFILE_DIR": str(TUNNEL_PROFILE_DIR)}
-        key = self.api_key(config)
-        if key:
-            env["CONTROL_PLANE_API_KEY"] = key
-        if config.tunnel_id.strip():
-            env["CONTROL_PLANE_TUNNEL_ID"] = config.tunnel_id.strip()
+    @staticmethod
+    def _runtime_env(config: AppConfig) -> dict[str, str]:
+        if not config.control_plane_api_key.strip():
+            raise ValueError("CONTROL_PLANE_API_KEY is required")
+        env = os.environ.copy()
+        env["CONTROL_PLANE_API_KEY"] = config.control_plane_api_key.strip()
         return env
 
-    def load_state(self) -> TunnelState:
-        if not TUNNEL_STATE_FILE.exists():
-            return TunnelState()
-        data = json.loads(TUNNEL_STATE_FILE.read_text(encoding="utf-8"))
-        return TunnelState(**{k: data.get(k, v) for k, v in asdict(TunnelState()).items()})
+    @staticmethod
+    def _stdio_command_text() -> str:
+        command = [sys.executable, str(LAUNCHER)]
+        return subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
 
-    def save_state(self, state: TunnelState) -> None:
-        TUNNEL_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        TUNNEL_STATE_FILE.write_text(json.dumps(asdict(state), ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def get_version(self, config: AppConfig) -> str:
-        exe = self.resolve_executable(config)
-        result = subprocess.run(
-            [str(exe), "--version"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            shell=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        if result.returncode != 0:
-            return result.stderr.strip() or "unknown"
-        return (result.stdout or result.stderr).strip()
-
-    def list_profiles(self) -> list[str]:
-        if not TUNNEL_PROFILE_DIR.exists():
-            return []
-        return sorted(p.stem for p in TUNNEL_PROFILE_DIR.glob("*.yaml"))
-
-    def is_profile_initialized(self, profile: str) -> bool:
-        return (TUNNEL_PROFILE_DIR / f"{profile}.yaml").exists()
-
-    def status(self, config: AppConfig) -> TunnelStatus:
-        state = self.load_state()
-        try:
-            exe = self.resolve_executable(config)
-            version = self.get_version(config)
-            installed = True
-        except FileNotFoundError:
-            exe = Path(config.tunnel_client_path or "")
-            version = ""
-            installed = False
-        profile = config.tunnel_profile.strip() or "local-repo"
-        return TunnelStatus(
-            executable=str(exe),
-            version=version,
-            installed=installed,
-            profile_dir=str(TUNNEL_PROFILE_DIR),
-            profile_initialized=self.is_profile_initialized(profile),
-            profiles=self.list_profiles(),
-            state=state,
-        )
-
-    def build_mcp_command(self, python_executable: Path) -> list[str]:
-        launcher = PROJECT_ROOT / "launch_mcp.py"
-        return [str(python_executable), str(launcher.resolve())]
-
-    def init_profile(self, config: AppConfig, python_executable: Path) -> None:
-        exe = self.resolve_executable(config)
-        mcp_cmd = self.build_mcp_command(python_executable)
-        cmd = [
-            str(exe),
-            "init",
-            "--sample",
-            "sample_mcp_stdio_local",
-            "--profile",
-            config.tunnel_profile,
-            "--tunnel-id",
-            config.tunnel_id.strip(),
-            "--mcp-command",
-            " ".join(mcp_cmd),
+    def init_profile(self, config: AppConfig) -> str:
+        executable = self.resolve_executable(config)
+        if not config.tunnel_id.strip():
+            raise ValueError("Tunnel ID is required")
+        if not config.tunnel_profile.strip():
+            raise ValueError("Tunnel profile is required")
+        command = [
+            executable, "init", "--profile", config.tunnel_profile.strip(),
+            "--tunnel-id", config.tunnel_id.strip(),
         ]
+        if config.transport == "stdio":
+            command.extend([
+                "--sample", "sample_mcp_stdio_local",
+                "--mcp-command", self._stdio_command_text(),
+            ])
+        else:
+            if config.http_auth_mode == "bearer":
+                raise RuntimeError(
+                    "HTTP Tunnel setup with a custom Bearer token is not automated. "
+                    "Use STDIO Tunnel or configure tunnel-client manually."
+                )
+            command.extend(["--mcp-server-url", config.endpoint_url()])
         result = subprocess.run(
-            cmd,
-            cwd=str(PROJECT_ROOT),
-            env={**os.environ, **self.tunnel_env(config)},
-            capture_output=True,
-            text=True,
-            timeout=120,
-            shell=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            command, env=self._runtime_env(config), cwd=ROOT,
+            text=True, capture_output=True, timeout=60, check=False, shell=False,
         )
-        output = (result.stdout or "") + (result.stderr or "")
+        output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
         if result.returncode != 0:
-            state = self.load_state()
-            state.last_error = output.strip()[:500]
-            self.save_state(state)
-            raise RuntimeError(output.strip() or f"tunnel-client init 失败 (code={result.returncode})")
+            raise RuntimeError(output or "tunnel-client init failed")
+        return output or "Profile initialized"
 
-        import time
-
-        state = self.load_state()
-        state.profile_initialized = True
-        state.last_error = ""
-        self.save_state(state)
-        for line in output.splitlines():
-            if line.strip():
-                self._log(f"[Tunnel] {line.strip()}")
-
-    def run_doctor(self, config: AppConfig) -> str:
-        exe = self.resolve_executable(config)
+    def doctor(self, config: AppConfig) -> str:
+        executable = self.resolve_executable(config)
         result = subprocess.run(
-            [str(exe), "doctor", "--profile", config.tunnel_profile, "--explain"],
-            cwd=str(PROJECT_ROOT),
-            env={**os.environ, **self.tunnel_env(config)},
-            capture_output=True,
-            text=True,
-            timeout=120,
-            shell=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            [executable, "doctor", "--profile", config.tunnel_profile.strip(), "--explain"],
+            env=self._runtime_env(config), cwd=ROOT,
+            text=True, capture_output=True, timeout=60, check=False, shell=False,
         )
-        output = (result.stdout or "") + (result.stderr or "")
-        import time
-
-        state = self.load_state()
-        state.last_doctor_at = int(time.time())
-        state.last_doctor_ok = result.returncode == 0
+        output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
         if result.returncode != 0:
-            state.last_error = output.strip()[:500]
-            self.save_state(state)
-            raise RuntimeError(output.strip() or f"tunnel-client doctor 失败 (code={result.returncode})")
-        state.last_error = ""
-        self.save_state(state)
-        return output.strip()
+            raise RuntimeError(output or "tunnel-client doctor failed")
+        return output or "Doctor passed"
 
-    def build_run_cmd(self, config: AppConfig) -> list[str]:
-        exe = self.resolve_executable(config)
-        return [str(exe), "run", "--profile", config.tunnel_profile]
-
-    def run_env(self, config: AppConfig) -> dict[str, str]:
-        return self.tunnel_env(config)
+    def start(self, config: AppConfig) -> None:
+        executable = self.resolve_executable(config)
+        if config.transport == "streamable-http" and not self.processes.mcp.running:
+            raise RuntimeError("Start the Streamable HTTP MCP server before starting the Tunnel")
+        self.processes.tunnel.start(
+            [executable, "run", "--profile", config.tunnel_profile.strip()],
+            env=self._runtime_env(config), cwd=ROOT,
+        )

@@ -2,37 +2,34 @@ from __future__ import annotations
 
 import re
 
-SECRET_PATTERNS = [
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"(?i)aws_secret_access_key\s*=\s*['\"]?[A-Za-z0-9/+=]{30,}['\"]?"),
-    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"]{12,}['\"]"),
-    re.compile(r"-----BEGIN (RSA|OPENSSH|EC|DSA)? ?PRIVATE KEY-----"),
-    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
-    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
-    re.compile(r"(?i)xox[baprs]-[A-Za-z0-9-]{10,}"),
-]
-
-
-def added_lines(patch: str) -> str:
-    lines: list[str] = []
-    for line in patch.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
-            lines.append(line[1:])
-    return "\n".join(lines)
+_PATTERNS = (
+    ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("private key", re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----")),
+    (
+        "credential assignment",
+        re.compile(r"(?i)\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*['\"][^'\"]{12,}['\"]"),
+    ),
+)
 
 
 class SecretScanner:
-    def scan_text(self, text: str) -> list[str]:
-        findings: list[str] = []
-        for pattern in SECRET_PATTERNS:
-            if pattern.search(text):
-                findings.append(f"pattern:{pattern.pattern[:40]}")
-        return findings
+    """Blocks several common credential patterns in patch additions.
 
-    def scan_patch(self, patch: str) -> list[str]:
-        return self.scan_text(added_lines(patch))
+    This is deliberately small and is not a complete secret-scanning solution.
+    """
+
+    @staticmethod
+    def added_text(patch: str) -> str:
+        return "\n".join(
+            line[1:]
+            for line in patch.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
 
     def require_clean_patch(self, patch: str) -> None:
-        findings = self.scan_patch(patch)
-        if findings:
-            raise PermissionError(f"patch blocked by credential pattern check: {', '.join(findings)}")
+        added = self.added_text(patch)
+        for name, pattern in _PATTERNS:
+            if pattern.search(added):
+                raise PermissionError(f"patch appears to add a {name}")

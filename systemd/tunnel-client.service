@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenAI Secure MCP Tunnel Client for Local Repo
+Description=OpenAI Secure MCP Tunnel Client
 After=network-online.target
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ User=repo-mcp
 Group=repo-mcp
 EnvironmentFile=/etc/local-repo-mcp/tunnel.env
 ExecStart=/usr/local/bin/tunnel-client run --profile local-repo
-Restart=always
+Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true

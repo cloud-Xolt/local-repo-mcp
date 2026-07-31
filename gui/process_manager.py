@@ -5,180 +5,131 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from gui.config import AppConfig, PROJECT_ROOT
-from gui.tunnel_manager import TunnelManager
+from gui.config import AppConfig
+
+ROOT = Path(__file__).resolve().parents[1]
+LAUNCHER = ROOT / "launch_mcp.py"
 
 
-@dataclass
-class ProcessInfo:
-    name: str
-    proc: subprocess.Popen | None = None
-    started_at: float | None = None
-    log_lines: list[str] = field(default_factory=list)
-    _reader_thread: threading.Thread | None = field(default=None, repr=False)
+class ManagedProcess:
+    def __init__(self, name: str, max_log_lines: int = 2000) -> None:
+        self.name = name
+        self.process: subprocess.Popen[str] | None = None
+        self.started_at: float | None = None
+        self.logs: deque[str] = deque(maxlen=max_log_lines)
+        self._reader: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     @property
     def running(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None
+        return self.process is not None and self.process.poll() is None
 
     @property
-    def pid(self) -> str:
-        if not self.running or self.proc is None:
-            return "-"
-        return str(self.proc.pid)
+    def pid(self) -> int | None:
+        return self.process.pid if self.running and self.process else None
 
     @property
-    def uptime(self) -> str:
+    def uptime(self) -> int:
         if not self.running or self.started_at is None:
-            return "-"
-        seconds = int(time.time() - self.started_at)
-        minutes, sec = divmod(seconds, 60)
-        hours, minutes = divmod(minutes, 60)
-        if hours:
-            return f"{hours}h {minutes}m {sec}s"
-        if minutes:
-            return f"{minutes}m {sec}s"
-        return f"{sec}s"
+            return 0
+        return max(0, int(time.time() - self.started_at))
 
-
-class ProcessManager:
-    MAX_LOG_LINES = 2000
-
-    def __init__(self, on_log: Callable[[str, str], None] | None = None) -> None:
-        self.on_log = on_log
-        self.mcp = ProcessInfo(name="MCP Server")
-        self.tunnel = ProcessInfo(name="Tunnel Client")
-        self._lock = threading.Lock()
-        self.tunnel_manager = TunnelManager(on_log=lambda line: self._append_log(self.tunnel, line))
-
-    def _python_executable(self) -> Path:
-        venv_python = PROJECT_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        if venv_python.exists():
-            return venv_python
-        return Path(sys.executable)
-
-    def _append_log(self, info: ProcessInfo, line: str) -> None:
-        timestamp = time.strftime("%H:%M:%S")
-        entry = f"[{timestamp}] {line}"
+    def append_log(self, line: str) -> None:
         with self._lock:
-            info.log_lines.append(entry)
-            if len(info.log_lines) > self.MAX_LOG_LINES:
-                info.log_lines = info.log_lines[-self.MAX_LOG_LINES :]
-        if self.on_log:
-            self.on_log(info.name, entry)
+            self.logs.append(line.rstrip("\r\n"))
 
-    def _start_reader(self, info: ProcessInfo) -> None:
-        if info.proc is None or info.proc.stdout is None:
-            return
-
-        def reader() -> None:
-            assert info.proc is not None and info.proc.stdout is not None
-            for raw in iter(info.proc.stdout.readline, b""):
-                line = raw.decode("utf-8", errors="replace").rstrip()
-                if line:
-                    self._append_log(info, line)
-            code = info.proc.wait()
-            self._append_log(info, f"[{info.name}] 进程已退出 (code={code})")
-
-        info._reader_thread = threading.Thread(target=reader, daemon=True)
-        info._reader_thread.start()
-
-    def _spawn(
+    def start(
         self,
-        info: ProcessInfo,
-        cmd: list[str],
+        command: list[str],
+        *,
         env: dict[str, str] | None = None,
         cwd: Path | None = None,
     ) -> None:
-        if info.running:
-            raise RuntimeError(f"{info.name} 已在运行")
-
-        merged_env = os.environ.copy()
-        if env:
-            merged_env.update(env)
-
-        info.proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd or PROJECT_ROOT),
-            env=merged_env,
+        if self.running:
+            raise RuntimeError(f"{self.name} is already running")
+        self.logs.clear()
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        self.process = subprocess.Popen(
+            command,
+            cwd=str(cwd or ROOT),
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            shell=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            creationflags=creationflags,
         )
-        info.started_at = time.time()
-        info.log_lines.clear()
-        self._append_log(info, f"[{info.name}] 已启动: {' '.join(cmd)}")
-        self._start_reader(info)
+        self.started_at = time.time()
+        self.append_log(f"$ {' '.join(command)}")
+        self._reader = threading.Thread(target=self._read_output, daemon=True)
+        self._reader.start()
 
-    def start_mcp(self, config: AppConfig) -> None:
-        python = self._python_executable()
-        launcher = PROJECT_ROOT / "launch_mcp.py"
-        self._spawn(
-            self.mcp,
-            [str(python), str(launcher)],
-            env=config.mcp_env(),
-            cwd=PROJECT_ROOT,
-        )
-
-    def tunnel_status(self, config: AppConfig):
-        return self.tunnel_manager.status(config)
-
-    def init_tunnel(self, config: AppConfig) -> None:
-        self.tunnel_manager.init_profile(config, self._python_executable())
-
-    def start_tunnel(self, config: AppConfig, init_first: bool = True) -> None:
-        if init_first and not self.tunnel_manager.is_profile_initialized(config.tunnel_profile):
-            self.init_tunnel(config)
-        cmd = self.tunnel_manager.build_run_cmd(config)
-        env = self.tunnel_manager.run_env(config)
-        self._spawn(self.tunnel, cmd, env=env, cwd=PROJECT_ROOT)
-
-    def run_tunnel_doctor(self, config: AppConfig) -> str:
-        return self.tunnel_manager.run_doctor(config)
-
-    def stop(self, info: ProcessInfo) -> None:
-        if not info.running or info.proc is None:
+    def _read_output(self) -> None:
+        process = self.process
+        if process is None or process.stdout is None:
             return
-        info.proc.terminate()
+        for line in iter(process.stdout.readline, ""):
+            if not line:
+                break
+            self.append_log(line)
+        code = process.poll()
+        self.append_log(f"[{self.name} exited with code {code}]")
+
+    def stop(self, timeout: float = 5.0) -> None:
+        process = self.process
+        if process is None or process.poll() is not None:
+            self.process = None
+            self.started_at = None
+            return
+        process.terminate()
         try:
-            info.proc.wait(timeout=5)
+            process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            info.proc.kill()
-            info.proc.wait(timeout=3)
-        self._append_log(info, f"[{info.name}] 已停止")
-        info.proc = None
-        info.started_at = None
+            process.kill()
+            process.wait(timeout=2)
+        self.append_log(f"[{self.name} stopped]")
+        self.process = None
+        self.started_at = None
+
+    def snapshot(self) -> list[str]:
+        with self._lock:
+            return list(self.logs)
+
+
+class ProcessManager:
+    def __init__(self) -> None:
+        self.mcp = ManagedProcess("MCP")
+        self.tunnel = ManagedProcess("Tunnel")
+
+    def start_http(self, config: AppConfig) -> None:
+        if config.transport != "streamable-http":
+            raise RuntimeError("Persistent MCP process is available only for Streamable HTTP")
+        env = os.environ.copy()
+        env.update(config.mcp_env())
+        env["MCP_TRANSPORT"] = "streamable-http"
+        self.mcp.start([sys.executable, str(LAUNCHER)], env=env, cwd=ROOT)
+
+    def restart_http(self, config: AppConfig) -> None:
+        self.mcp.stop()
+        self.start_http(config)
 
     def stop_all(self) -> None:
-        self.stop(self.tunnel)
-        self.stop(self.mcp)
+        self.tunnel.stop()
+        self.mcp.stop()
 
-    def restart_mcp(self, config: AppConfig) -> None:
-        self.stop(self.mcp)
-        self.start_mcp(config)
 
-    def restart_tunnel(self, config: AppConfig) -> None:
-        self.stop(self.tunnel)
-        self.start_tunnel(config, init_first=False)
-
-    def get_recent_logs(self, info: ProcessInfo, limit: int = 500) -> list[str]:
-        with self._lock:
-            return info.log_lines[-limit:]
-
-    def tail_audit_log(self, path: str, last_size: int) -> tuple[list[str], int]:
-        audit_path = Path(path)
-        if not audit_path.exists():
-            return [], 0
-        size = audit_path.stat().st_size
-        if size <= last_size:
-            return [], last_size
-        with audit_path.open("r", encoding="utf-8", errors="replace") as handle:
-            handle.seek(last_size)
-            new_text = handle.read()
-        lines = [f"[audit] {line}" for line in new_text.splitlines() if line.strip()]
-        return lines, size
+def format_uptime(seconds: int) -> str:
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"

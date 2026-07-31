@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from security.guard import (
-    is_read_denied,
-    list_files as guard_list_files,
-    read_text_file,
-    validate_read_path,
-    validate_write_path,
-)
+from security.guard import list_files as guarded_list_files
+from security.guard import read_text_file, validate_read_path, validate_write_path
 
 
 class RepoFilesystem:
@@ -19,30 +13,26 @@ class RepoFilesystem:
 
     def list_files(self, path: str, limit: int) -> dict:
         base, _ = validate_read_path(self.repo_root, path or ".")
-        limit = min(max(limit, 1), 1000)
-
+        effective_limit = min(max(limit, 1), 1000)
         if base.is_file():
-            rel = base.relative_to(self.repo_root).as_posix()
-            return {"files": [rel], "truncated": False, "limit": limit}
-
+            relative = base.relative_to(self.repo_root).as_posix()
+            return {"files": [relative], "truncated": False, "limit": effective_limit}
         if not base.is_dir():
             raise FileNotFoundError(path)
-
-        files, truncated = guard_list_files(base, self.repo_root, limit)
-        return {"files": files, "truncated": truncated, "limit": limit}
+        files, truncated = guarded_list_files(base, self.repo_root, effective_limit)
+        return {"files": files, "truncated": truncated, "limit": effective_limit}
 
     def read_file(self, path: str) -> dict:
-        target, rel = validate_read_path(self.repo_root, path)
+        target, relative = validate_read_path(self.repo_root, path)
         if not target.is_file():
             raise FileNotFoundError(path)
-
         content, size = read_text_file(target, self.max_file_bytes)
         return {
-            "path": rel,
+            "path": relative,
             "bytes": size,
             "content": content,
             "content_trust": "untrusted_repository_data",
         }
 
-    def check_write_path(self, rel_path: str) -> None:
-        validate_write_path(self.repo_root, rel_path)
+    def check_write_path(self, relative: str) -> None:
+        validate_write_path(self.repo_root, relative)

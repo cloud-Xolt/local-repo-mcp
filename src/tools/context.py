@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -12,8 +11,6 @@ from repo.filesystem import RepoFilesystem
 from repo.git import GitController, run_git
 from security.scanner import SecretScanner
 from tools.test_runner import RepoTestRunner
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @dataclass
@@ -33,37 +30,47 @@ class RuntimeContext:
     test_runner: RepoTestRunner
 
 
-def _parse_mode(raw: str) -> Literal["read", "write", "test"]:
-    mode = raw.lower()
+def _positive_int(name: str, default: int, maximum: int) -> int:
+    value = int(os.environ.get(name, str(default)))
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return min(value, maximum)
+
+
+def _parse_mode(value: str) -> Literal["read", "write", "test"]:
+    mode = value.strip().lower()
     if mode not in {"read", "write", "test"}:
-        raise RuntimeError(f"unsupported MCP_MODE={raw}; allowed: read, write, test")
+        raise RuntimeError(f"unsupported MCP_MODE={value}; allowed: read, write, test")
     return mode  # type: ignore[return-value]
 
 
 def build_context(mcp: MCPServer) -> RuntimeContext:
-    repo_root = Path(os.environ.get("REPO_ROOT", ".")).resolve()
+    repo_root = Path(os.environ.get("REPO_ROOT", ".")).expanduser().resolve()
+    max_file = _positive_int("MAX_FILE_BYTES", 200_000, 20_000_000)
+    max_patch = _positive_int("MAX_PATCH_BYTES", 200_000, 5_000_000)
+    max_search = _positive_int("MAX_SEARCH_RESULTS", 50, 1000)
+    max_output = _positive_int("MAX_OUTPUT_BYTES", 20_000, 2_000_000)
+    test_timeout = _positive_int("TEST_TIMEOUT_MAX", 300, 1800)
     audit_path = os.environ.get("AUDIT_LOG", "").strip()
-    audit = AuditLogger(audit_path) if audit_path else AuditLogger("")
+    audit = AuditLogger(audit_path)
 
-    def git_runner(args: list[str], input_text: str | None = None, timeout: int = 30):
+    def runner(args: list[str], input_text: str | None = None, timeout: int = 30):
         return run_git(repo_root, args, input_text=input_text, timeout=timeout)
-
-    max_output_bytes = int(os.environ.get("MAX_OUTPUT_BYTES", "200000"))
 
     return RuntimeContext(
         mcp=mcp,
         repo_root=repo_root,
         mode=_parse_mode(os.environ.get("MCP_MODE", "read")),
-        max_file_bytes=int(os.environ.get("MAX_FILE_BYTES", "200000")),
-        max_patch_bytes=int(os.environ.get("MAX_PATCH_BYTES", "200000")),
-        max_search_results=int(os.environ.get("MAX_SEARCH_RESULTS", "50")),
-        max_output_bytes=max_output_bytes,
+        max_file_bytes=max_file,
+        max_patch_bytes=max_patch,
+        max_search_results=max_search,
+        max_output_bytes=max_output,
         allow_dirty_worktree=os.environ.get("ALLOW_DIRTY_WORKTREE", "false").lower() == "true",
-        filesystem=RepoFilesystem(repo_root, int(os.environ.get("MAX_FILE_BYTES", "200000"))),
-        git=GitController(repo_root, git_runner, max_output_bytes),
+        filesystem=RepoFilesystem(repo_root, max_file),
+        git=GitController(repo_root, runner, max_output),
         scanner=SecretScanner(),
         audit=audit if audit.enabled else None,
-        test_runner=RepoTestRunner(repo_root),
+        test_runner=RepoTestRunner(repo_root, max_output, test_timeout),
     )
 
 
@@ -72,25 +79,6 @@ def require_mode(ctx: RuntimeContext, *modes: str) -> None:
         raise PermissionError(f"tool not allowed in MCP_MODE={ctx.mode}; required={modes}")
 
 
-def audit_event(
-    ctx: RuntimeContext,
-    *,
-    tool: str,
-    status: str,
-    target: str | None = None,
-    targets: list[str] | None = None,
-    input_bytes: int = 0,
-    input_hash: str = "",
-    result_hash: str = "",
-) -> None:
-    if ctx.audit is None:
-        return
-    ctx.audit.log(
-        tool=tool,
-        status=status,
-        target=target,
-        targets=targets,
-        input_bytes=input_bytes,
-        input_hash=input_hash,
-        result_hash=result_hash,
-    )
+def audit_event(ctx: RuntimeContext, **record) -> None:
+    if ctx.audit is not None:
+        ctx.audit.log(**record)
