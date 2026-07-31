@@ -1,24 +1,9 @@
 @echo off
-setlocal EnableExtensions
+setlocal
 cd /d "%~dp0"
-
-if not exist ".venv\Scripts\python.exe" (
-    echo [Local Repo MCP] Creating virtual environment...
-    python -m venv .venv
-    if errorlevel 1 (
-        echo ERROR: Failed to create venv. Install Python 3.11+
-        pause
-        exit /b 1
-    )
-    call ".venv\Scripts\pip.exe" install -r requirements.txt
-    if errorlevel 1 (
-        echo ERROR: Failed to install dependencies
-        pause
-        exit /b 1
-    )
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" run_gui.py
+) else (
+  python run_gui.py
 )
-
-echo [Local Repo MCP] Starting control panel...
-".venv\Scripts\python.exe" run_gui.py
-if errorlevel 1 pause
 endlocal

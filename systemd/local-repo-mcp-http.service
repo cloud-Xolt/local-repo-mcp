@@ -1,0 +1,21 @@
+[Unit]
+Description=Local Repo MCP Streamable HTTP Server
+After=network.target
+
+[Service]
+Type=simple
+User=repo-mcp
+Group=repo-mcp
+WorkingDirectory=/opt/local-repo-mcp
+EnvironmentFile=/etc/local-repo-mcp/mcp.env
+ExecStart=/opt/local-repo-mcp/.venv/bin/python /opt/local-repo-mcp/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/repos/target-repo /var/log/local-repo-mcp
+
+[Install]
+WantedBy=multi-user.target

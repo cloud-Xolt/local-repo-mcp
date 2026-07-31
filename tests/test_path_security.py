@@ -1,59 +1,58 @@
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
 import pytest
 
-from security.guard import resolve_repo_path, validate_read_path, validate_write_path
+from repo.filesystem import RepoFilesystem
+from security.guard import validate_read_path, validate_write_path
 
 
-def test_reject_parent_traversal(repo_root: Path) -> None:
+def test_rejects_absolute_and_parent_paths(tmp_path: Path) -> None:
     with pytest.raises(PermissionError):
-        resolve_repo_path(repo_root, "../../etc/passwd")
-
-
-def test_reject_absolute_path(repo_root: Path) -> None:
+        validate_read_path(tmp_path, str(tmp_path / "file.txt"))
     with pytest.raises(PermissionError):
-        resolve_repo_path(repo_root, "/etc/passwd")
-    if os.name == "nt":
+        validate_read_path(tmp_path, "../outside.txt")
+
+
+def test_rejects_sensitive_paths(tmp_path: Path) -> None:
+    for path in (".env", ".git", ".git/config", ".ssh", "id_rsa", "secrets/token.txt"):
         with pytest.raises(PermissionError):
-            resolve_repo_path(repo_root, r"C:\Windows\System32\config")
-
-
-def test_reject_env_and_git(repo_root: Path) -> None:
+            validate_read_path(tmp_path, path)
     with pytest.raises(PermissionError):
-        validate_read_path(repo_root, ".env")
-    with pytest.raises(PermissionError):
-        validate_read_path(repo_root, ".git/config")
+        validate_write_path(tmp_path, ".github/workflows/release.yml")
 
 
-def test_allow_normal_source(repo_root: Path) -> None:
-    _, rel = validate_read_path(repo_root, "src/app.py")
-    assert rel == "src/app.py"
-
-
-def test_reject_external_symlink(repo_root: Path, tmp_path: Path) -> None:
-    outside = tmp_path / "outside.txt"
-    outside.write_text("x", encoding="utf-8")
-    link = repo_root / "link.txt"
+def test_rejects_symlink(tmp_path: Path) -> None:
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink unavailable")
+    outside = tmp_path.parent / "outside-secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    link = tmp_path / "linked.txt"
     try:
         link.symlink_to(outside)
     except OSError:
-        pytest.skip("symlink creation requires elevated privileges on this platform")
+        pytest.skip("symlink creation is not permitted")
     with pytest.raises(PermissionError):
-        validate_read_path(repo_root, "link.txt")
+        validate_read_path(tmp_path, "linked.txt")
 
 
-def test_reject_internal_file_symlink(repo_root: Path) -> None:
-    target = repo_root / "src" / "app.py"
-    link = repo_root / "src" / "link.py"
-    try:
-        link.symlink_to(target)
-    except OSError:
-        pytest.skip("symlink creation requires elevated privileges on this platform")
+def test_read_file_rejects_binary_and_non_utf8(tmp_path: Path) -> None:
+    fs = RepoFilesystem(tmp_path, 1000)
+    (tmp_path / "binary.bin").write_bytes(b"abc\x00def")
+    (tmp_path / "bad.txt").write_bytes(b"\xff\xfe")
     with pytest.raises(PermissionError):
-        validate_read_path(repo_root, "src/link.py")
-
-
-def test_write_deny_workflows(repo_root: Path) -> None:
+        fs.read_file("binary.bin")
     with pytest.raises(PermissionError):
-        validate_write_path(repo_root, ".github/workflows/ci.yml")
+        fs.read_file("bad.txt")
+
+
+def test_list_skips_symlinks_and_sensitive_files(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('ok')", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=secret", encoding="utf-8")
+    fs = RepoFilesystem(tmp_path, 1000)
+    result = fs.list_files(".", 200)
+    assert "src/app.py" in result["files"]
+    assert ".env" not in result["files"]

@@ -1,30 +1,32 @@
-# Local Repo MCP 轻量化安全整改
+# Contributing
 
-## 定位
+Local Repo MCP intentionally stays small and security-focused.
 
-轻量、单一用途的本地 Git 仓库 MCP Server — 非企业 Agent Runtime。
+## Development setup
 
-## 实现状态
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pytest tests/ -v
+```
 
-| 模块 | 状态 | 位置 |
-|------|------|------|
-| 路径 guard | ✅ | `src/security/guard.py` |
-| 凭证 regex | ✅ | `src/security/scanner.py` |
-| 安全读取/列表 | ✅ | `src/repo/filesystem.py` |
-| 过滤 Git | ✅ | `src/repo/git.py` |
-| 单步 Patch | ✅ | `src/tools/patch.py` |
-| 白名单测试 | ✅ | `src/tools/test_runner.py` |
-| 固定 launcher | ✅ | `launch_mcp.py` |
-| 轻量 GUI | ✅ | `gui/app.py`（4 页） |
+## Pull requests
 
-## MCP Tools（7 个）
+- Keep changes inside the documented single-repository scope.
+- Do not add a general-purpose shell or unrestricted file writes.
+- Do not add automatic Git push, reset, rebase, checkout, or merge.
+- Do not reintroduce RBAC, sessions, risk scoring, enterprise policy engines, or Docker sandbox orchestration.
+- Add tests for security-sensitive changes.
+- Update both English and Chinese documentation for user-facing changes.
+- Use `shell=False` for subprocesses and pass arguments as arrays.
 
-`repo_list_files`, `repo_read_file`, `repo_search_code`, `repo_git_status`, `repo_git_diff`, `repo_apply_patch`, `repo_run_test`
+## Good contribution areas
 
-## 已删除
-
-Session, RBAC, Risk, Policy YAML, Agent 分支, Patch 审批, Docker Sandbox, Tunnel 自动安装, 本地组件注册
-
-## 开发约束
-
-见 `AGENTS.md` 与 `local-repo-mcp-lightweight-security-refactor-guide.md`
+- Windows, macOS, and Linux compatibility
+- GUI usability and accessibility
+- localization
+- security regression tests
+- packaging and release automation
+- MCP-client configuration examples
+- diagnostics and troubleshooting

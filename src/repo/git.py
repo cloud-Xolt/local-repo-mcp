@@ -40,127 +40,97 @@ def parse_numstat_z(stdout: str) -> list[str]:
     return sorted(set(paths))
 
 
-def parse_patch_targets(repo_root: Path, run_git: Callable, patch: str) -> list[str]:
-    result = run_git(["apply", "--check", "--numstat", "-z"], input_text=patch, timeout=30)
-    if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or "invalid patch")
-    return parse_numstat_z(result.stdout)
-
-
 class GitController:
-    def __init__(self, repo_root: Path, run_git: Callable, max_output_bytes: int) -> None:
+    def __init__(self, repo_root: Path, runner: Callable, max_output_bytes: int) -> None:
         self.repo_root = repo_root
-        self.run_git = run_git
+        self.runner = runner
         self.max_output_bytes = max_output_bytes
 
-    def current_branch(self) -> str:
-        result = self.run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+    def _require_ok(self, result: subprocess.CompletedProcess[str], fallback: str) -> str:
         if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "failed to get branch")
-        return result.stdout.strip()
+            raise RuntimeError(result.stderr.strip() or fallback)
+        return result.stdout
+
+    def current_branch(self) -> str:
+        result = self.runner(["rev-parse", "--abbrev-ref", "HEAD"])
+        return self._require_ok(result, "failed to get current branch").strip() or "-"
 
     def branch_warning(self) -> str | None:
-        branch = self.current_branch()
-        if branch in {"main", "master"}:
-            return "Changes were applied on the current branch. A feature branch is recommended."
-        return None
+        return (
+            "Changes were applied on the current branch. A feature branch is recommended."
+            if self.current_branch() in {"main", "master"}
+            else None
+        )
 
     def is_worktree_clean(self) -> bool:
-        result = self.run_git(["status", "--porcelain"])
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "git status failed")
-        return not result.stdout.strip()
+        result = self.runner(["status", "--porcelain"])
+        return not self._require_ok(result, "git status failed").strip()
 
     def status_filtered(self) -> dict:
-        result = self.run_git(["status", "--porcelain=v1", "-z"])
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "git status failed")
-
+        result = self.runner(["status", "--porcelain=v1", "-z"])
+        raw = self._require_ok(result, "git status failed")
         entries: list[dict[str, str]] = []
         hidden = 0
-        raw = result.stdout
-        i = 0
-        while i < len(raw):
-            if i + 2 > len(raw):
-                break
-            status = raw[i : i + 2]
-            i += 2
-            if i < len(raw) and raw[i] == " ":
-                i += 1
-            path_end = raw.find("\0", i)
-            if path_end == -1:
-                break
-            path = raw[i:path_end]
-            i = path_end + 1
-            if " -> " in path:
-                path = path.split(" -> ", 1)[1]
+        tokens = [token for token in raw.split("\0") if token]
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            index += 1
+            if len(token) < 3:
+                continue
+            status = token[:2]
+            path = token[3:] if token[2:3] == " " else token[2:]
+            if status[0] in {"R", "C"} and index < len(tokens):
+                path = tokens[index]
+                index += 1
             normalized = path.replace("\\", "/")
             if is_read_denied(normalized):
                 hidden += 1
-                continue
-            entries.append({"status": status, "path": normalized})
-
-        return {
-            "branch": self.current_branch(),
-            "entries": entries,
-            "hidden_entries": hidden,
-        }
+            else:
+                entries.append({"status": status, "path": normalized})
+        return {"branch": self.current_branch(), "entries": entries, "hidden_entries": hidden}
 
     def _changed_paths(self, staged: bool) -> list[str]:
         args = ["diff", "--cached", "--name-only", "-z"] if staged else ["diff", "--name-only", "-z"]
-        result = self.run_git(args, timeout=30)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "git diff --name-only failed")
-        return [p.replace("\\", "/") for p in result.stdout.split("\0") if p.strip()]
+        result = self.runner(args)
+        raw = self._require_ok(result, "git diff --name-only failed")
+        return [path.replace("\\", "/") for path in raw.split("\0") if path.strip()]
 
     def diff_filtered(self, staged: bool = False, max_bytes: int | None = None) -> dict:
         effective_max = min(max(max_bytes or self.max_output_bytes, 1), self.max_output_bytes)
         changed = self._changed_paths(staged)
-        allowed: list[str] = []
-        hidden = 0
-        for path in changed:
-            if is_read_denied(path):
-                hidden += 1
-            else:
-                allowed.append(path)
-
+        allowed = [path for path in changed if not is_read_denied(path)]
+        hidden = len(changed) - len(allowed)
         if not allowed:
             return {"diff": "", "hidden_files": hidden, "truncated": False, "branch": self.current_branch()}
-
-        args = ["diff"]
-        if staged:
-            args.append("--cached")
-        args.extend(["--", *allowed])
-        result = self.run_git(args, timeout=30)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "git diff failed")
-
-        diff = result.stdout
-        truncated = False
+        args = ["diff"] + (["--cached"] if staged else []) + ["--", *allowed]
+        result = self.runner(args)
+        diff = self._require_ok(result, "git diff failed")
         encoded = diff.encode("utf-8")
-        if len(encoded) > effective_max:
+        truncated = len(encoded) > effective_max
+        if truncated:
             diff = encoded[:effective_max].decode("utf-8", errors="ignore")
-            truncated = True
-
-        return {
-            "diff": diff,
-            "hidden_files": hidden,
-            "truncated": truncated,
-            "branch": self.current_branch(),
-        }
-
-    def apply_patch_check(self, patch: str) -> None:
-        result = self.run_git(["apply", "--check", "--whitespace=nowarn"], input_text=patch, timeout=30)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "git apply --check failed")
-
-    def apply_patch(self, patch: str) -> None:
-        result = self.run_git(["apply", "--whitespace=nowarn"], input_text=patch, timeout=30)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "git apply failed")
+        return {"diff": diff, "hidden_files": hidden, "truncated": truncated, "branch": self.current_branch()}
 
     def patch_targets(self, patch: str) -> list[str]:
-        return parse_patch_targets(self.repo_root, self.run_git, patch)
+        result = self.runner(["apply", "--check", "--numstat", "-z"], input_text=patch)
+        stdout = self._require_ok(result, "invalid patch")
+        targets = parse_numstat_z(stdout)
+        if not targets:
+            raise ValueError("patch does not contain supported text-file changes")
+        return targets
+
+    def apply_patch_check(self, patch: str) -> None:
+        self._require_ok(
+            self.runner(["apply", "--check", "--whitespace=nowarn"], input_text=patch),
+            "git apply --check failed",
+        )
+
+    def apply_patch(self, patch: str) -> None:
+        self._require_ok(
+            self.runner(["apply", "--whitespace=nowarn"], input_text=patch),
+            "git apply failed",
+        )
 
 
 def run_git(
@@ -170,16 +140,8 @@ def run_git(
     input_text: str | None = None,
     timeout: int = 30,
 ) -> subprocess.CompletedProcess[str]:
-    cmd = [
-        "git",
-        "-C",
-        str(repo_root),
-        "-c",
-        f"safe.directory={repo_root}",
-        *args,
-    ]
     return subprocess.run(
-        cmd,
+        ["git", "-C", str(repo_root), "-c", f"safe.directory={repo_root}", *args],
         input=input_text,
         text=True,
         capture_output=True,

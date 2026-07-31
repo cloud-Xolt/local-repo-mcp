@@ -1,29 +1,19 @@
+from pathlib import Path
+
 import pytest
 
-from tools.context import require_mode
-from tools.test_runner import RepoTestRunner, TEST_COMMANDS
+from tools.test_runner import RepoTestRunner
 
 
-def test_read_mode_rejects_test(runtime, monkeypatch) -> None:
-    runtime.mode = "read"
+def test_rejects_arbitrary_command(tmp_path: Path) -> None:
+    runner = RepoTestRunner(tmp_path, 20000, 300)
     with pytest.raises(PermissionError):
-        require_mode(runtime, "test")
+        runner.run("rm -rf /", 10)
 
 
-def test_write_mode_rejects_test(runtime, monkeypatch) -> None:
-    runtime.mode = "write"
-    with pytest.raises(PermissionError):
-        require_mode(runtime, "test")
+def test_output_is_bounded() -> None:
+    from tools.test_runner import _truncate
 
-
-def test_unknown_command_key(runtime) -> None:
-    runner = RepoTestRunner(runtime.repo_root)
-    with pytest.raises(PermissionError):
-        runner.run("custom_shell", 5)
-
-
-def test_whitelist_keys_exist() -> None:
-    assert "python_pytest" in TEST_COMMANDS
-    for command in TEST_COMMANDS.values():
-        assert isinstance(command, list)
-        assert command
+    text, truncated = _truncate("x" * 100, 10)
+    assert truncated is True
+    assert len(text.encode()) <= 10
