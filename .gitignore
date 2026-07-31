@@ -4,3 +4,9 @@ __pycache__/
 audit.log
 .env
 config.json
+sessions.json
+security/__pycache__/
+session/__pycache__/
+audit/__pycache__/
+sandbox/__pycache__/
+repo/__pycache__/
