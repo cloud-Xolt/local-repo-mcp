@@ -25,6 +25,7 @@ class SecretScanner:
             if pattern.search(text):
                 findings.append(f"pattern:{pattern.pattern[:40]}")
         findings.extend(self._scan_with_gitleaks(text))
+        findings.extend(self._scan_with_trufflehog(text))
         return findings
 
     def scan_patch(self, patch: str) -> list[str]:
@@ -56,6 +57,29 @@ class SecretScanner:
 
         if result.returncode == 1 or "leaks found" in (result.stdout + result.stderr).lower():
             return ["gitleaks:potential_secret"]
+        return []
+
+    def _scan_with_trufflehog(self, text: str) -> list[str]:
+        trufflehog = shutil.which("trufflehog")
+        if not trufflehog:
+            return []
+
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        result = subprocess.run(
+            [trufflehog, "filesystem", tmp_path, "--json"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        Path(tmp_path).unlink(missing_ok=True)
+
+        if result.returncode != 0 and result.stdout.strip():
+            return ["trufflehog:potential_secret"]
+        if result.stdout.strip() and result.stdout.strip() not in ("[]", "{}"):
+            return ["trufflehog:potential_secret"]
         return []
 
     def require_clean_patch(self, patch: str) -> None:

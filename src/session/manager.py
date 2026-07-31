@@ -5,7 +5,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SESSIONS_FILE = PROJECT_ROOT / "sessions.json"
 
 PERMISSION_LEVELS = {
@@ -24,7 +24,9 @@ class Session:
     repo: str
     branch: str
     permission: str
+    role: str
     created: int
+    approved_patch_hash: str = ""
 
     def allows(self, required: str) -> bool:
         return PERMISSION_LEVELS.get(self.permission, 0) >= PERMISSION_LEVELS.get(required, 0)
@@ -45,6 +47,7 @@ class SessionManager:
             return
         data = json.loads(self.sessions_file.read_text(encoding="utf-8"))
         for item in data:
+            item.setdefault("role", "developer")
             session = Session(**item)
             self._sessions[session.session_id] = session
 
@@ -52,7 +55,7 @@ class SessionManager:
         payload = [asdict(s) for s in self._sessions.values()]
         self.sessions_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def create(self, user: str, permission: str, branch: str) -> Session:
+    def create(self, user: str, permission: str, branch: str, role: str = "developer") -> Session:
         session_id = f"agent-{uuid.uuid4().hex[:12]}"
         session = Session(
             session_id=session_id,
@@ -60,6 +63,7 @@ class SessionManager:
             repo=str(self.repo_root),
             branch=branch,
             permission=permission,
+            role=role,
             created=int(time.time()),
         )
         self._sessions[session_id] = session
@@ -86,6 +90,20 @@ class SessionManager:
         if session:
             session.branch = branch
             self._save()
+
+    def approve_patch(self, session_id: str, patch_hash: str) -> None:
+        session = self._sessions.get(session_id)
+        if not session:
+            raise PermissionError(f"unknown session: {session_id}")
+        session.approved_patch_hash = patch_hash
+        self._save()
+
+    def require_approved_patch(self, session_id: str, patch_hash: str) -> None:
+        session = self._sessions.get(session_id)
+        if not session:
+            raise PermissionError(f"unknown session: {session_id}")
+        if session.approved_patch_hash != patch_hash:
+            raise PermissionError("patch not approved; call repo_approve_patch after repo_prepare_patch")
 
     def end(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)

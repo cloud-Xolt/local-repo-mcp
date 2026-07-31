@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from gui.config import AppConfig, PROJECT_ROOT
+from gui.tunnel_manager import TunnelManager
 
 
 @dataclass
@@ -45,20 +46,13 @@ class ProcessManager:
         self.mcp = ProcessInfo(name="MCP Server")
         self.tunnel = ProcessInfo(name="Tunnel Client")
         self._lock = threading.Lock()
+        self.tunnel_manager = TunnelManager(on_log=lambda line: self._append_log(self.tunnel, line))
 
     def _python_executable(self) -> Path:
         venv_python = PROJECT_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         if venv_python.exists():
             return venv_python
         return Path(sys.executable)
-
-    def _tunnel_executable(self, config: AppConfig) -> str:
-        if config.tunnel_client_path.strip():
-            return config.tunnel_client_path.strip()
-        found = shutil.which("tunnel-client")
-        if found:
-            return found
-        raise FileNotFoundError("未找到 tunnel-client，请安装或在设置中指定路径")
 
     def _append_log(self, info: ProcessInfo, line: str) -> None:
         timestamp = time.strftime("%H:%M:%S")
@@ -140,48 +134,24 @@ class ProcessManager:
             f"{env_parts} {shlex_quote(str(python))} {shlex_quote(str(server))}'"
         )
 
-    def init_tunnel(self, config: AppConfig) -> None:
-        tunnel_exe = self._tunnel_executable(config)
-        mcp_command = self._build_mcp_command(config)
-        cmd = [
-            tunnel_exe,
-            "init",
-            "--sample",
-            "sample_mcp_stdio_local",
-            "--profile",
-            config.tunnel_profile,
-            "--tunnel-id",
-            config.tunnel_id.strip(),
-            "--mcp-command",
-            mcp_command,
-        ]
-        env = {"CONTROL_PLANE_API_KEY": config.control_plane_api_key.strip()}
-        result = subprocess.run(
-            cmd,
-            cwd=str(PROJECT_ROOT),
-            env={**os.environ, **env},
-            capture_output=True,
-            text=True,
-            timeout=60,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode != 0:
-            raise RuntimeError(output.strip() or f"tunnel-client init 失败 (code={result.returncode})")
-        self._append_log(self.tunnel, "[Tunnel Client] tunnel profile 初始化成功")
-        for line in output.splitlines():
-            if line.strip():
-                self._append_log(self.tunnel, line.strip())
+    def install_tunnel(self) -> str:
+        return self.tunnel_manager.install_managed()
 
-    def start_tunnel(self, config: AppConfig) -> None:
-        tunnel_exe = self._tunnel_executable(config)
-        self.init_tunnel(config)
-        self._spawn(
-            self.tunnel,
-            [tunnel_exe, "run", "--profile", config.tunnel_profile],
-            env={"CONTROL_PLANE_API_KEY": config.control_plane_api_key.strip()},
-            cwd=PROJECT_ROOT,
-        )
+    def tunnel_status(self, config: AppConfig):
+        return self.tunnel_manager.status(config)
+
+    def init_tunnel(self, config: AppConfig) -> None:
+        self.tunnel_manager.init_profile(config, self._build_mcp_command)
+
+    def start_tunnel(self, config: AppConfig, init_first: bool = True) -> None:
+        if init_first and not self.tunnel_manager.is_profile_initialized(config.tunnel_profile):
+            self.init_tunnel(config)
+        cmd = self.tunnel_manager.build_run_cmd(config)
+        env = self.tunnel_manager.run_env(config)
+        self._spawn(self.tunnel, cmd, env=env, cwd=PROJECT_ROOT)
+
+    def run_tunnel_doctor(self, config: AppConfig) -> str:
+        return self.tunnel_manager.run_doctor(config)
 
     def stop(self, info: ProcessInfo) -> None:
         if not info.running or info.proc is None:
@@ -199,6 +169,10 @@ class ProcessManager:
     def stop_all(self) -> None:
         self.stop(self.tunnel)
         self.stop(self.mcp)
+
+    def restart_tunnel(self, config: AppConfig) -> None:
+        self.stop(self.tunnel)
+        self.start_tunnel(config, init_first=False)
 
     def get_recent_logs(self, info: ProcessInfo, limit: int = 500) -> list[str]:
         with self._lock:

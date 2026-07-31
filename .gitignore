@@ -1,12 +1,12 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 audit.log
 .env
 config.json
 sessions.json
-security/__pycache__/
-session/__pycache__/
-audit/__pycache__/
-sandbox/__pycache__/
-repo/__pycache__/
+bin/tunnel-client/
+data/tunnel/
+gui/__pycache__/
+tests/**/__pycache__/

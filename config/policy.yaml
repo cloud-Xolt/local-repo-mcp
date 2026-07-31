@@ -47,3 +47,39 @@ git:
   - master
   - release/*
   - production/*
+rbac:
+  default_role: developer
+  roles:
+    viewer:
+      permissions:
+      - read
+    developer:
+      permissions:
+      - read
+      - write
+    tester:
+      permissions:
+      - read
+      - write
+      - test
+      - execute
+    shipper:
+      permissions:
+      - read
+      - write
+      - test
+      - execute
+      - ship
+  users:
+    admin: shipper
+    ci-bot: tester
+risk:
+  block_threshold: 90
+  high_threshold: 70
+  sensitive_paths:
+  - .github/workflows/**
+  - deploy/**
+  - terraform/**
+  - .env*
+  - '*.pem'
+  - .ssh/**

@@ -4,16 +4,30 @@
   <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-> Secure local Git repository access for ChatGPT via [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) — no public MCP endpoint required.
+> **Secure Agent Coding Runtime** for local Git repos: policy, RBAC, sessions, approval workflow, and sandboxed writes. Run as a standalone MCP Server for Cursor / Claude Desktop, etc. **Optionally** connect ChatGPT via [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) and tunnel-client — no public MCP endpoint required.
+
+**Two modes:**
+
+| Mode | Description |
+|------|-------------|
+| **MCP only** (default) | Start MCP Server only; tunnel-client not required |
+| **ChatGPT** (optional) | Enable Tunnel in Settings, configure ID/Key, then start Tunnel + MCP |
 
 ```text
-ChatGPT → Custom MCP App → Secure MCP Tunnel → tunnel-client → Local Repo MCP → Local Repo
+# MCP only
+MCP client → Local Repo MCP → local repo
+
+# ChatGPT (optional)
+ChatGPT → Custom MCP App → Secure MCP Tunnel → tunnel-client → Local Repo MCP → local repo
 ```
 
 ## Features
 
-- **Policy Engine** — read/write/execute rules via `security/rules.yaml`
+- **Policy Engine** — read/write/execute rules via `config/policy.yaml`
+- **Enterprise RBAC** — user/role permissions in policy file
+- **Risk Scoring** — high-risk operations blocked and scored in audit logs
 - **Session model** — write and test operations require an active session
+- **Approval workflow** — prepare → approve → apply for patches
 - **Git branch sandbox** — protected branches auto-switch to `agent/{session_id}`
 - **Path sandbox** — all operations confined to `REPO_ROOT`
 - **Secret scanning** — blocks credentials in patches before apply
@@ -26,13 +40,18 @@ ChatGPT → Custom MCP App → Secure MCP Tunnel → tunnel-client → Local Rep
 
 ```text
 local-repo-mcp/
-├── server.py
-├── security/          # Policy Engine, Secret Scanner, rules.yaml
-├── session/           # Session Manager
-├── audit/             # Audit framework
-├── repo/              # Filesystem & Git control
-├── sandbox/           # Docker test sandbox
-├── gui/               # GUI control panel
+├── server.py              # entry shim
+├── config/policy.yaml     # policy, RBAC, risk thresholds
+├── src/
+│   ├── mcp_app/server.py  # MCP registration
+│   ├── tools/             # read, patch, test, session tools
+│   ├── security/          # policy_engine, rbac, risk, scanner
+│   ├── session/
+│   ├── repo/
+│   ├── sandbox/
+│   └── audit/
+├── tests/                 # security acceptance tests
+├── gui/
 ├── run_gui.py
 ├── start_gui.bat
 ├── requirements.txt
@@ -48,7 +67,7 @@ local-repo-mcp/
 | Git 2.39+ | Repository operations |
 | ripgrep (`rg`) | Code search |
 | Docker | Test sandbox execution |
-| [tunnel-client](https://github.com/openai/tunnel-client) | ChatGPT integration |
+| [tunnel-client](https://github.com/openai/tunnel-client) | **Optional** — only for ChatGPT integration |
 
 ## Quick Start
 
@@ -68,30 +87,37 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. GUI (Recommended)
+### 2. GUI (Recommended — all operations in-app)
 
-**Windows:** double-click `start_gui.bat`
+**Windows:** double-click `start_gui.bat` (auto-creates venv, installs deps, opens the panel)
 
 ```bash
 python run_gui.py
 ```
 
-The GUI exposes all settings: repo path, mode, policy file, sessions file, protected branches, write deny rules, test allowlist, Docker sandbox limits, and Tunnel credentials.
+Four tabs:
 
-**Save Config** writes `config.json`, `.env`, and `rules.yaml`.
+| Tab | Purpose |
+|-----|---------|
+| **Overview** | One-click MCP / Tunnel+MCP start, env check, quick folder open |
+| **Settings** | Repo, mode, RBAC, policy, Tunnel, sandbox — full configuration |
+| **Operations** | Git status, session management, Tunnel doctor/init, security tests |
+| **Logs** | Live MCP / Tunnel / audit stream |
+
+**Save Config** writes `config.json`, `.env`, and `config/policy.yaml`.
 
 ### 3. CLI
 
 ```bash
 export REPO_ROOT=/path/to/your/repo
 export MCP_MODE=read
-export POLICY_RULES=./security/rules.yaml
+export POLICY_RULES=./config/policy.yaml
 export AUDIT_LOG=./audit.log
 
 python server.py
 ```
 
-## ChatGPT Integration
+## ChatGPT Integration (Optional)
 
 ### Prerequisites
 
@@ -123,6 +149,7 @@ In ChatGPT: **Apps → Create developer-mode app → Connection: Tunnel → Scan
 ```text
 repo_session_start(user, permission="write")
   → repo_prepare_patch(patch, session_id)
+  → repo_approve_patch(patch, session_id)
   → repo_apply_patch(patch, session_id)
   → repo_run_test(command_key, session_id)
   → repo_session_end(session_id)
@@ -140,7 +167,8 @@ repo_session_start(user, permission="write")
 | `repo_git_status` | read | git status |
 | `repo_git_diff` | read | git diff |
 | `repo_prepare_patch` | write | Validate patch without applying |
-| `repo_apply_patch` | write | Apply patch |
+| `repo_approve_patch` | write | Approve patch for apply |
+| `repo_apply_patch` | write | Apply approved patch |
 | `repo_run_test` | test | Run test in Docker sandbox |
 
 ## Configuration
@@ -153,7 +181,7 @@ repo_session_start(user, permission="write")
 | `MAX_PATCH_BYTES` | `200000` | Max patch size (bytes) |
 | `ALLOW_DIRTY_WORKTREE` | `false` | Allow patch on dirty worktree |
 | `AUDIT_LOG` | `./audit.log` | Audit log path |
-| `POLICY_RULES` | `./security/rules.yaml` | Policy rules file |
+| `POLICY_RULES` | `./config/policy.yaml` | Policy rules file |
 | `SESSIONS_FILE` | `./sessions.json` | Session storage path |
 | `SANDBOX_MEMORY` | `2g` | Docker sandbox memory |
 | `SANDBOX_CPUS` | `2` | Docker sandbox CPUs |
@@ -171,6 +199,12 @@ See [`.env.example`](./.env.example) for a full template.
 | 3 | `test` | + Docker sandbox tests |
 
 **Never enable:** arbitrary shell, `git push`, `git reset`, `git rebase`, etc.
+
+## Tests
+
+```bash
+python -m pytest tests/ -v
+```
 
 ## Security Notes
 

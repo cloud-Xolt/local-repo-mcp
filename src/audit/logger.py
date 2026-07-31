@@ -17,8 +17,10 @@ class AuditLogger:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def hash_input(value: str) -> str:
+    def hash_value(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+    hash_input = hash_value
 
     def _redact(self, obj: Any) -> Any:
         if isinstance(obj, dict):
@@ -46,15 +48,21 @@ class AuditLogger:
         risk_level: str = "low",
         target_files: list[str] | None = None,
         input_hash: str = "",
+        result_hash: str = "",
+        risk_score: int = 0,
+        risk_factors: list[str] | None = None,
     ) -> None:
         record = {
             "session_id": session_id or "",
             "tool": tool,
             "timestamp": int(time.time()),
             "input_hash": input_hash,
+            "result_hash": result_hash,
             "target_files": target_files or [],
             "result": result,
-            "risk_level": risk_level,
+            "risk": risk_level,
+            "risk_score": risk_score,
+            "risk_factors": risk_factors or [],
             "payload": self._redact(payload),
         }
         with self.log_path.open("a", encoding="utf-8") as f:

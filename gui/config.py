@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -6,7 +8,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config.json"
-DEFAULT_POLICY_PATH = PROJECT_ROOT / "security" / "rules.yaml"
+DEFAULT_POLICY_PATH = PROJECT_ROOT / "config" / "policy.yaml"
 
 MCP_MODES = ("read", "write", "test", "ship")
 
@@ -55,6 +57,10 @@ class AppConfig:
     control_plane_api_key: str = ""
     tunnel_client_path: str = ""
     tunnel_profile: str = "local-repo"
+    rbac_default_role: str = "developer"
+    rbac_users: list[str] = field(default_factory=lambda: ["admin:shipper"])
+    auto_start_mcp: bool = False
+    use_tunnel: bool = False
 
     def __post_init__(self) -> None:
         if not self.repo_root:
@@ -100,15 +106,28 @@ class AppConfig:
             Path(self.sessions_file).parent.mkdir(parents=True, exist_ok=True)
         return errors
 
-    def validate_tunnel(self) -> list[str]:
+    def validate_tunnel_for_start(self) -> list[str]:
+        """启动 Tunnel / ChatGPT 接入时校验（用户主动选择）。"""
         errors = self.validate()
         if not self.tunnel_id.strip():
             errors.append("请填写 Tunnel ID")
         if not self.control_plane_api_key.strip():
             errors.append("请填写 Control Plane API Key")
+        from gui.tunnel_manager import TUNNEL_BIN_DIR
+
+        managed = TUNNEL_BIN_DIR / ("tunnel-client.exe" if os.name == "nt" else "tunnel-client")
+        has_client = managed.exists() or bool(self.tunnel_client_path.strip()) or bool(shutil.which("tunnel-client"))
+        if not has_client:
+            errors.append("tunnel-client 未安装，请到 Tunnel 页点击「安装/更新到项目」")
         if self.tunnel_client_path and not Path(self.tunnel_client_path).exists():
-            errors.append("tunnel-client 路径不存在")
+            errors.append("tunnel-client 覆盖路径不存在")
         return errors
+
+    def validate_tunnel(self) -> list[str]:
+        """启用 Tunnel 选项开启时的持续校验；未启用则不强制。"""
+        if not self.use_tunnel:
+            return self.validate()
+        return self.validate_tunnel_for_start()
 
 
 def lines_to_list(text: str) -> list[str]:
@@ -119,6 +138,21 @@ def list_to_lines(items: list[str]) -> str:
     return "\n".join(items)
 
 
+def rbac_users_to_lines(users: dict[str, str]) -> str:
+    return "\n".join(f"{user}:{role}" for user, role in sorted(users.items()))
+
+
+def lines_to_rbac_users(text: str) -> dict[str, str]:
+    users: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        user, role = line.split(":", 1)
+        users[user.strip()] = role.strip()
+    return users
+
+
 def load_policy_into_config(config: AppConfig) -> AppConfig:
     path = Path(config.policy_rules)
     if not path.exists():
@@ -126,9 +160,14 @@ def load_policy_into_config(config: AppConfig) -> AppConfig:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     git = data.get("git", {})
     permission = data.get("permission", {})
+    rbac = data.get("rbac", {})
     config.protected_branches = git.get("protected_branches", config.protected_branches)
     config.write_deny_patterns = permission.get("write", {}).get("deny", config.write_deny_patterns)
     config.execute_allow = permission.get("execute", {}).get("allow", config.execute_allow)
+    config.rbac_default_role = rbac.get("default_role", config.rbac_default_role)
+    users = rbac.get("users", {})
+    if users:
+        config.rbac_users = [f"{u}:{r}" for u, r in users.items()]
     return config
 
 
@@ -160,6 +199,22 @@ def write_policy_yaml(config: AppConfig) -> Path:
     }
     data["permission"]["execute"] = {"allow": config.execute_allow}
     data["git"] = {"protected_branches": config.protected_branches}
+    data["rbac"] = {
+        "default_role": config.rbac_default_role,
+        "roles": data.get("rbac", {}).get(
+            "roles",
+            {
+                "viewer": {"permissions": ["read"]},
+                "developer": {"permissions": ["read", "write"]},
+                "tester": {"permissions": ["read", "write", "test", "execute"]},
+                "shipper": {"permissions": ["read", "write", "test", "execute", "ship"]},
+            },
+        ),
+        "users": lines_to_rbac_users("\n".join(config.rbac_users)),
+    }
+    data.setdefault("risk", {})
+    data["risk"].setdefault("block_threshold", 90)
+    data["risk"].setdefault("high_threshold", 70)
 
     path.write_text(yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False), encoding="utf-8")
     return path
@@ -172,7 +227,9 @@ def load_config() -> AppConfig:
     data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     fields = AppConfig.__dataclass_fields__
     config = AppConfig(**{k: v for k, v in data.items() if k in fields})
-    return config
+    if "security/rules.yaml" in config.policy_rules.replace("\\", "/"):
+        config.policy_rules = str(DEFAULT_POLICY_PATH)
+    return load_policy_into_config(config)
 
 
 def save_config(config: AppConfig) -> None:
