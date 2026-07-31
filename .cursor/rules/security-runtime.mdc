@@ -1,0 +1,28 @@
+---
+description: Local Repo MCP 安全运行时约束 — 每次代码生成前必读
+alwaysApply: true
+---
+
+# Local Repo MCP 安全约束
+
+修改前读 `CONTRIBUTING.md` 与 `AGENTS.md`。
+
+## 禁止
+
+- 任意 shell、`shell=True`、绕过 Policy/RBAC/Risk/Sandbox/路径检查
+- `write_file`、`run_command(任意字符串)`、自动 git push/commit
+- 删除 `tests/test_*.py` 中的安全验收用例
+
+## 必须
+
+- 新 Tool：Schema + 权限 + 风险 + Policy + RBAC + `audit_tool()` + 测试
+- 写：prepare → approve → apply；Patch 目标用 `git apply --stat`
+- 分支：写入仅在 `agent/{session_id}`
+- 策略：`config/policy.yaml`（含 rbac、risk 节）
+- 代码位置：`src/tools/`、`src/security/`、`src/mcp_app/server.py`
+
+## 调用链
+
+```
+Tool → RBAC → Policy → Session → Risk → Execute → Audit
+```

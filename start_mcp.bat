@@ -18,7 +18,7 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-echo [Local Repo MCP] Starting control panel...
-".venv\Scripts\python.exe" run_gui.py
+echo [Local Repo MCP] Starting MCP Server...
+".venv\Scripts\python.exe" server.py
 if errorlevel 1 pause
 endlocal

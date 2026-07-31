@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_RULES_PATH = PROJECT_ROOT / "security" / "rules.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_RULES_PATH = PROJECT_ROOT / "config" / "policy.yaml"
 
 PERMISSION_ORDER = ("read", "write", "test", "execute", "ship")
 

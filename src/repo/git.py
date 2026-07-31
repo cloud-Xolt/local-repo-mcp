@@ -1,8 +1,9 @@
-import subprocess
 from pathlib import Path
 from typing import Callable
 
-from security.policy import PolicyEngine
+from repo import branch as branch_ops
+from repo.patch import PatchValidator
+from security.policy_engine import PolicyEngine
 
 
 class GitController:
@@ -10,36 +11,19 @@ class GitController:
         self.repo_root = repo_root
         self.policy = policy
         self.run_git = run_git
+        self.patch_validator = PatchValidator(run_git)
 
     def current_branch(self) -> str:
-        result = self.run_git(["rev-parse", "--abbrev-ref", "HEAD"])
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr)
-        return result.stdout.strip()
+        return branch_ops.get_current_branch(self.run_git)
 
     def ensure_agent_branch(self, session_id: str) -> str:
-        current = self.current_branch()
-        if not self.policy.is_protected_branch(current):
-            return current
-
-        branch = f"agent/{session_id}"
-        exists = self.run_git(["show-ref", "--verify", f"refs/heads/{branch}"])
-        if exists.returncode != 0:
-            create = self.run_git(["checkout", "-b", branch])
-            if create.returncode != 0:
-                raise RuntimeError(f"failed to create agent branch: {create.stderr}")
-        else:
-            checkout = self.run_git(["checkout", branch])
-            if checkout.returncode != 0:
-                raise RuntimeError(f"failed to checkout agent branch: {checkout.stderr}")
-        return branch
+        return branch_ops.ensure_agent_branch(session_id, self.run_git)
 
     def require_writable_branch(self) -> None:
-        current = self.current_branch()
-        if self.policy.is_protected_branch(current):
-            raise PermissionError(
-                f"writes blocked on protected branch '{current}'; start a session to create agent/* branch"
-            )
+        branch_ops.require_writable_branch(self.run_git, self.policy.protected_branches())
+
+    def patch_targets(self, patch: str) -> list[str]:
+        return self.patch_validator.targets_from_git_stat(patch)
 
     def status_short(self) -> str:
         result = self.run_git(["status", "--short"])

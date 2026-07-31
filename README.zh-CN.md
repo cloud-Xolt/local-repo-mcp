@@ -4,16 +4,30 @@
   <a href="./README.md">English</a> · <strong>简体中文</strong>
 </p>
 
-> 通过 [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 以**最小权限**方式将本地 Git 仓库接入 ChatGPT，无需暴露公网 MCP 入口。
+> 本地 **Secure Agent Coding Runtime**：策略、RBAC、Session、审批与沙箱写流程。可直接作为 MCP Server 供 Cursor / Claude Desktop 等客户端连接；如需接入 ChatGPT，可通过 [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) **可选** 启用 tunnel-client，无需暴露公网 MCP 入口。
+
+**两种使用模式：**
+
+| 模式 | 说明 |
+|------|------|
+| **纯 MCP**（默认） | 只启动 MCP Server，无需 tunnel-client |
+| **ChatGPT 接入**（可选） | 勾选「启用 Tunnel」并配置 ID/Key 后，一键启动 Tunnel + MCP |
 
 ```text
+# 纯 MCP
+MCP 客户端 → Local Repo MCP → 本地仓库
+
+# ChatGPT 接入（可选）
 ChatGPT → Custom MCP App → Secure MCP Tunnel → tunnel-client → Local Repo MCP → 本地仓库
 ```
 
 ## 特性
 
-- **Policy Engine** — 基于 `security/rules.yaml` 的读写/执行策略
+- **Policy Engine** — 基于 `config/policy.yaml` 的读写/执行策略
+- **Enterprise RBAC** — 策略文件中的用户/角色权限
+- **Risk Scoring** — 高风险操作拦截并写入审计
 - **Session 模型** — 写入与测试需先创建 Session
+- **审批流程** — prepare → approve → apply
 - **Git 分支沙箱** — 受保护分支自动切到 `agent/{session_id}`
 - **路径沙箱** — 所有操作限制在 `REPO_ROOT` 内
 - **Secret 扫描** — Patch 应用前检测密钥与凭证
@@ -26,13 +40,18 @@ ChatGPT → Custom MCP App → Secure MCP Tunnel → tunnel-client → Local Rep
 
 ```text
 local-repo-mcp/
-├── server.py
-├── security/          # Policy Engine、Secret Scanner、rules.yaml
-├── session/           # Session Manager
-├── audit/             # 审计框架
-├── repo/              # 文件系统与 Git 控制
-├── sandbox/           # Docker 测试沙箱
-├── gui/               # GUI 控制面板
+├── server.py              # 入口 shim
+├── config/policy.yaml     # 策略、RBAC、风险阈值
+├── src/
+│   ├── mcp_app/server.py  # MCP 注册
+│   ├── tools/             # read、patch、test、session
+│   ├── security/          # policy_engine、rbac、risk、scanner
+│   ├── session/
+│   ├── repo/
+│   ├── sandbox/
+│   └── audit/
+├── tests/                 # 安全验收测试
+├── gui/
 ├── run_gui.py
 ├── start_gui.bat
 ├── requirements.txt
@@ -48,7 +67,7 @@ local-repo-mcp/
 | Git 2.39+ | 仓库操作 |
 | ripgrep（`rg`） | 代码搜索 |
 | Docker | 测试沙箱执行 |
-| [tunnel-client](https://github.com/openai/tunnel-client) | ChatGPT 接入 |
+| [tunnel-client](https://github.com/openai/tunnel-client) | **可选** — 仅 ChatGPT 接入时需要 |
 
 ## 快速开始
 
@@ -68,24 +87,33 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. 使用 GUI（推荐）
+### 2. 使用 GUI（推荐 · 全操作在此完成）
 
-**Windows：** 双击 `start_gui.bat`
+**Windows：** 双击 `start_gui.bat`（自动创建 venv、安装依赖、打开控制面板）
 
 ```bash
 python run_gui.py
 ```
 
-GUI 支持配置：仓库路径、运行模式、策略文件、Session 文件、受保护分支、写入 deny 规则、测试白名单、Docker 沙箱参数、Tunnel 连接等。
+GUI 四个标签页：
 
-点击 **保存配置 · 同步策略** 会写入 `config.json`、`.env` 和 `rules.yaml`。
+| 标签 | 功能 |
+|------|------|
+| **概览** | 一键启动 MCP / Tunnel+MCP（可选）、环境检查、快捷打开目录 |
+| **本地组件** | MCP、venv、配置、Tunnel 等本地侧纳管（Tunnel 未启用时显示「可选」） |
+| **Tunnel** | tunnel-client 安装、启停、Doctor（可选） |
+| **配置** | 仓库、模式、RBAC、策略；可勾选「启用 ChatGPT Tunnel 接入」 |
+| **运维** | Git 状态、Session 管理、Tunnel Doctor、安全测试 |
+| **日志** | MCP / Tunnel / 审计实时日志 |
+
+点击 **保存配置 · 同步策略** 会写入 `config.json`、`.env` 和 `config/policy.yaml`。
 
 ### 3. 命令行启动
 
 ```bash
 export REPO_ROOT=/path/to/your/repo
 export MCP_MODE=read
-export POLICY_RULES=./security/rules.yaml
+export POLICY_RULES=./config/policy.yaml
 export AUDIT_LOG=./audit.log
 
 python server.py
@@ -123,6 +151,7 @@ tunnel-client run --profile local-repo
 ```text
 repo_session_start(user, permission="write")
   → repo_prepare_patch(patch, session_id)
+  → repo_approve_patch(patch, session_id)
   → repo_apply_patch(patch, session_id)
   → repo_run_test(command_key, session_id)
   → repo_session_end(session_id)
@@ -140,7 +169,8 @@ repo_session_start(user, permission="write")
 | `repo_git_status` | read | git status |
 | `repo_git_diff` | read | git diff |
 | `repo_prepare_patch` | write | 校验 patch（不应用） |
-| `repo_apply_patch` | write | 应用 patch |
+| `repo_approve_patch` | write | 审批 patch |
+| `repo_apply_patch` | write | 应用已审批 patch |
 | `repo_run_test` | test | Docker 沙箱运行测试 |
 
 ## 配置说明
@@ -153,7 +183,7 @@ repo_session_start(user, permission="write")
 | `MAX_PATCH_BYTES` | `200000` | Patch 最大字节 |
 | `ALLOW_DIRTY_WORKTREE` | `false` | 是否允许 dirty 时 apply patch |
 | `AUDIT_LOG` | `./audit.log` | 审计日志路径 |
-| `POLICY_RULES` | `./security/rules.yaml` | 策略文件路径 |
+| `POLICY_RULES` | `./config/policy.yaml` | 策略文件路径 |
 | `SESSIONS_FILE` | `./sessions.json` | Session 存储路径 |
 | `SANDBOX_MEMORY` | `2g` | Docker 沙箱内存 |
 | `SANDBOX_CPUS` | `2` | Docker 沙箱 CPU |
@@ -171,6 +201,12 @@ repo_session_start(user, permission="write")
 | 三 | `test` | + Docker 沙箱测试 |
 
 **永不开放：** 任意 Shell、`git push`、`git reset`、`git rebase` 等。
+
+## 测试
+
+```bash
+python -m pytest tests/ -v
+```
 
 ## 安全提示
 
