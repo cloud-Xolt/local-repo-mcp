@@ -8,7 +8,14 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from gui.config import MCP_MODES, AppConfig, load_config, save_config, write_env_file
+from gui.config import (
+    MCP_MODES,
+    AppConfig,
+    lines_to_list,
+    list_to_lines,
+    load_config,
+    save_all,
+)
 from gui.process_manager import ProcessManager
 
 ctk.set_appearance_mode("light")
@@ -92,8 +99,8 @@ class MCPControlApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Local Repo MCP")
-        self.geometry("1060x740")
-        self.minsize(920, 640)
+        self.geometry("1100x820")
+        self.minsize(960, 700)
         self.configure(fg_color=BG_APP)
 
         self.config_data = load_config()
@@ -179,6 +186,91 @@ class MCPControlApp(ctk.CTk):
         self.mcp_mode.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
         row += 1
 
+        SectionTitle(left, "安全与审计").grid(row=row, column=0, columnspan=3, sticky="w", padx=16, pady=(16, 8))
+        row += 1
+
+        ctk.CTkLabel(left, text="最大文件 (B)", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.max_file_bytes = ctk.CTkEntry(left, font=font_body, height=INPUT_HEIGHT)
+        self.max_file_bytes.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        ctk.CTkLabel(left, text="最大 Patch (B)", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.max_patch_bytes = ctk.CTkEntry(left, font=font_body, height=INPUT_HEIGHT)
+        self.max_patch_bytes.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        ctk.CTkLabel(left, text="审计日志", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.audit_log = ctk.CTkEntry(left, font=font_body, height=INPUT_HEIGHT)
+        self.audit_log.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        ctk.CTkLabel(left, text="策略文件", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.policy_rules = ctk.CTkEntry(left, font=font_body, height=INPUT_HEIGHT)
+        self.policy_rules.grid(row=row, column=1, sticky="ew", padx=6, pady=8)
+        ctk.CTkButton(
+            left, text="浏览", width=80, height=INPUT_HEIGHT, font=font_btn, command=self._browse_policy_rules
+        ).grid(row=row, column=2, padx=(0, 16), pady=8)
+        row += 1
+
+        ctk.CTkLabel(left, text="Session 文件", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.sessions_file = ctk.CTkEntry(left, font=font_body, height=INPUT_HEIGHT)
+        self.sessions_file.grid(row=row, column=1, sticky="ew", padx=6, pady=8)
+        ctk.CTkButton(
+            left, text="浏览", width=80, height=INPUT_HEIGHT, font=font_btn, command=self._browse_sessions_file
+        ).grid(row=row, column=2, padx=(0, 16), pady=8)
+        row += 1
+
+        self.allow_dirty = ctk.CTkCheckBox(left, text="允许 dirty worktree 时 apply patch", font=font_body)
+        self.allow_dirty.grid(row=row, column=0, columnspan=3, sticky="w", padx=16, pady=(4, 8))
+        row += 1
+
+        SectionTitle(left, "Git 分支保护").grid(row=row, column=0, columnspan=3, sticky="w", padx=16, pady=(12, 4))
+        row += 1
+
+        ctk.CTkLabel(left, text="受保护分支", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="nw", padx=16, pady=8)
+        self.protected_branches = ctk.CTkTextbox(left, font=font_body, height=72)
+        self.protected_branches.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        SectionTitle(left, "写入策略 (deny)").grid(row=row, column=0, columnspan=3, sticky="w", padx=16, pady=(12, 4))
+        row += 1
+
+        ctk.CTkLabel(left, text="禁止写入", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="nw", padx=16, pady=8)
+        self.write_deny = ctk.CTkTextbox(left, font=font_body, height=96)
+        self.write_deny.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        SectionTitle(left, "测试命令白名单").grid(row=row, column=0, columnspan=3, sticky="w", padx=16, pady=(12, 4))
+        row += 1
+
+        ctk.CTkLabel(left, text="允许执行", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="nw", padx=16, pady=8)
+        self.execute_allow = ctk.CTkTextbox(left, font=font_body, height=96)
+        self.execute_allow.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        SectionTitle(left, "Docker 沙箱").grid(row=row, column=0, columnspan=3, sticky="w", padx=16, pady=(12, 8))
+        row += 1
+
+        ctk.CTkLabel(left, text="内存限制", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.sandbox_memory = ctk.CTkEntry(left, placeholder_text="2g", font=font_body, height=INPUT_HEIGHT)
+        self.sandbox_memory.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        ctk.CTkLabel(left, text="CPU 限制", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.sandbox_cpus = ctk.CTkEntry(left, placeholder_text="2", font=font_body, height=INPUT_HEIGHT)
+        self.sandbox_cpus.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        ctk.CTkLabel(left, text="tmpfs (MB)", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.sandbox_tmpfs_mb = ctk.CTkEntry(left, font=font_body, height=INPUT_HEIGHT)
+        self.sandbox_tmpfs_mb.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
+        ctk.CTkLabel(left, text="测试超时 (秒)", font=font_label, text_color=TEXT).grid(row=row, column=0, sticky="w", padx=16, pady=8)
+        self.test_timeout_max = ctk.CTkEntry(left, font=font_body, height=INPUT_HEIGHT)
+        self.test_timeout_max.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(6, 16), pady=8)
+        row += 1
+
         SectionTitle(left, "Tunnel 设置").grid(row=row, column=0, columnspan=3, sticky="w", padx=16, pady=(16, 8))
         row += 1
 
@@ -205,54 +297,16 @@ class MCPControlApp(ctk.CTk):
         ).grid(row=row, column=2, padx=(0, 16), pady=8)
         row += 1
 
-        self.advanced_toggle = ctk.CTkButton(
-            left,
-            text="▸ 高级设置",
-            font=font_body,
-            fg_color="transparent",
-            text_color=ACCENT,
-            hover_color=BTN_SECONDARY,
-            anchor="w",
-            command=self._toggle_advanced,
-        )
-        self.advanced_toggle.grid(row=row, column=0, columnspan=3, sticky="w", padx=12, pady=(8, 0))
-        row += 1
-
-        self.advanced_frame = ctk.CTkFrame(left, fg_color="transparent")
-        self.advanced_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=8, pady=(4, 0))
-        self.advanced_frame.grid_columnconfigure(1, weight=1)
-        self.advanced_frame.grid_remove()
-
-        ctk.CTkLabel(self.advanced_frame, text="最大文件 (B)", font=font_label, text_color=TEXT).grid(
-            row=0, column=0, sticky="w", padx=8, pady=6
-        )
-        self.max_file_bytes = ctk.CTkEntry(self.advanced_frame, font=font_body, height=INPUT_HEIGHT)
-        self.max_file_bytes.grid(row=0, column=1, sticky="ew", padx=8, pady=6)
-
-        ctk.CTkLabel(self.advanced_frame, text="最大 Patch (B)", font=font_label, text_color=TEXT).grid(
-            row=1, column=0, sticky="w", padx=8, pady=6
-        )
-        self.max_patch_bytes = ctk.CTkEntry(self.advanced_frame, font=font_body, height=INPUT_HEIGHT)
-        self.max_patch_bytes.grid(row=1, column=1, sticky="ew", padx=8, pady=6)
-
-        ctk.CTkLabel(self.advanced_frame, text="审计日志", font=font_label, text_color=TEXT).grid(
-            row=2, column=0, sticky="w", padx=8, pady=6
-        )
-        self.audit_log = ctk.CTkEntry(self.advanced_frame, font=font_body, height=INPUT_HEIGHT)
-        self.audit_log.grid(row=2, column=1, sticky="ew", padx=8, pady=6)
-
-        self.allow_dirty = ctk.CTkCheckBox(
-            self.advanced_frame, text="允许 dirty worktree 时 apply patch", font=font_body
-        )
-        self.allow_dirty.grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 10))
-        row += 1
-
         actions = ctk.CTkFrame(left, fg_color="transparent")
         actions.grid(row=row, column=0, columnspan=3, sticky="ew", padx=12, pady=(18, 16))
         actions.grid_columnconfigure((0, 1), weight=1)
 
         ctk.CTkButton(
-            actions, text="保存配置", font=font_btn, height=BTN_HEIGHT, command=self._save_config
+            actions,
+            text="保存配置 · 同步策略",
+            font=font_btn,
+            height=BTN_HEIGHT,
+            command=self._save_config,
         ).grid(row=0, column=0, sticky="ew", padx=4, pady=6)
         ctk.CTkButton(
             actions,
@@ -336,27 +390,35 @@ class MCPControlApp(ctk.CTk):
         )
         footer.grid(row=3, column=0, columnspan=2, sticky="w", padx=22, pady=(0, 12))
 
-    def _toggle_advanced(self) -> None:
-        if self.advanced_frame.winfo_viewable():
-            self.advanced_frame.grid_remove()
-            self.advanced_toggle.configure(text="▸ 高级设置")
-        else:
-            self.advanced_frame.grid()
-            self.advanced_toggle.configure(text="▾ 高级设置")
+    def _set_textbox(self, box: ctk.CTkTextbox, text: str) -> None:
+        box.delete("1.0", "end")
+        box.insert("1.0", text)
+
+    def _get_textbox(self, box: ctk.CTkTextbox) -> str:
+        return box.get("1.0", "end").strip()
 
     def _load_form(self) -> None:
         c = self.config_data
         self.repo_root.insert(0, c.repo_root)
         self.mcp_mode.set(c.mcp_mode)
+        self.max_file_bytes.insert(0, str(c.max_file_bytes))
+        self.max_patch_bytes.insert(0, str(c.max_patch_bytes))
+        self.audit_log.insert(0, c.audit_log)
+        self.policy_rules.insert(0, c.policy_rules)
+        self.sessions_file.insert(0, c.sessions_file)
+        if c.allow_dirty_worktree:
+            self.allow_dirty.select()
+        self._set_textbox(self.protected_branches, list_to_lines(c.protected_branches))
+        self._set_textbox(self.write_deny, list_to_lines(c.write_deny_patterns))
+        self._set_textbox(self.execute_allow, list_to_lines(c.execute_allow))
+        self.sandbox_memory.insert(0, c.sandbox_memory)
+        self.sandbox_cpus.insert(0, c.sandbox_cpus)
+        self.sandbox_tmpfs_mb.insert(0, str(c.sandbox_tmpfs_mb))
+        self.test_timeout_max.insert(0, str(c.test_timeout_max))
         self.tunnel_id.insert(0, c.tunnel_id)
         self.api_key.insert(0, c.control_plane_api_key)
         self.tunnel_profile.insert(0, c.tunnel_profile)
         self.tunnel_client_path.insert(0, c.tunnel_client_path)
-        self.max_file_bytes.insert(0, str(c.max_file_bytes))
-        self.max_patch_bytes.insert(0, str(c.max_patch_bytes))
-        self.audit_log.insert(0, c.audit_log)
-        if c.allow_dirty_worktree:
-            self.allow_dirty.select()
 
     def _collect_config(self) -> AppConfig:
         return AppConfig(
@@ -366,6 +428,15 @@ class MCPControlApp(ctk.CTk):
             max_patch_bytes=int(self.max_patch_bytes.get() or "200000"),
             allow_dirty_worktree=bool(self.allow_dirty.get()),
             audit_log=self.audit_log.get().strip(),
+            policy_rules=self.policy_rules.get().strip(),
+            sessions_file=self.sessions_file.get().strip(),
+            protected_branches=lines_to_list(self._get_textbox(self.protected_branches)),
+            write_deny_patterns=lines_to_list(self._get_textbox(self.write_deny)),
+            execute_allow=lines_to_list(self._get_textbox(self.execute_allow)),
+            sandbox_memory=self.sandbox_memory.get().strip() or "2g",
+            sandbox_cpus=self.sandbox_cpus.get().strip() or "2",
+            sandbox_tmpfs_mb=int(self.sandbox_tmpfs_mb.get() or "512"),
+            test_timeout_max=int(self.test_timeout_max.get() or "300"),
             tunnel_id=self.tunnel_id.get().strip(),
             control_plane_api_key=self.api_key.get().strip(),
             tunnel_client_path=self.tunnel_client_path.get().strip(),
@@ -377,6 +448,26 @@ class MCPControlApp(ctk.CTk):
         if path:
             self.repo_root.delete(0, tk.END)
             self.repo_root.insert(0, path)
+
+    def _browse_policy_rules(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="选择或新建策略文件",
+            defaultextension=".yaml",
+            filetypes=[("YAML", "*.yaml"), ("All files", "*.*")],
+        )
+        if path:
+            self.policy_rules.delete(0, tk.END)
+            self.policy_rules.insert(0, path)
+
+    def _browse_sessions_file(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="选择 Session 存储文件",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if path:
+            self.sessions_file.delete(0, tk.END)
+            self.sessions_file.insert(0, path)
 
     def _browse_tunnel_client(self) -> None:
         path = filedialog.askopenfilename(
@@ -417,12 +508,11 @@ class MCPControlApp(ctk.CTk):
             messagebox.showerror("配置错误", "\n".join(errors))
             return None
 
-        save_config(config)
-        write_env_file(config)
+        save_all(config)
         self.config_data = config
         if not silent:
-            self._append_log("配置已保存")
-            messagebox.showinfo("已保存", "配置已写入 config.json 与 .env")
+            self._append_log("配置已保存（config.json / .env / rules.yaml）")
+            messagebox.showinfo("已保存", "配置已写入 config.json、.env 与策略文件")
         return config
 
     def _run_action(self, label: str, action) -> None:

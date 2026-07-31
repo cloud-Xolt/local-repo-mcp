@@ -1,0 +1,49 @@
+repo:
+  root: .
+permission:
+  read:
+    allow:
+    - '**'
+    deny:
+    - .env*
+    - '*.pem'
+    - '*.key'
+    - '*.p12'
+    - '*.pfx'
+    - .ssh/**
+    - .git/**
+    - '*id_rsa*'
+    - '*credential*'
+    - '*credentials*'
+    - '*secret*'
+    - '*secrets*'
+    - '*token*'
+  write:
+    allow:
+    - '**'
+    deny:
+    - .env*
+    - '*.pem'
+    - '*.key'
+    - .ssh/**
+    - .git/**
+    - .github/workflows/**
+    - deploy/**
+    - terraform/**
+    - '*id_rsa*'
+    - '*credential*'
+    - '*secret*'
+  execute:
+    allow:
+    - python_pytest
+    - go_test
+    - node_test
+    - node_lint
+    - maven_test
+    - gradle_test
+git:
+  protected_branches:
+  - main
+  - master
+  - release/*
+  - production/*
