@@ -19,6 +19,6 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo [Local Repo MCP] Starting MCP Server...
-".venv\Scripts\python.exe" server.py
+".venv\Scripts\python.exe" launch_mcp.py
 if errorlevel 1 pause
 endlocal

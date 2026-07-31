@@ -11,9 +11,11 @@ Environment=REPO_ROOT=/opt/repos/project-a
 Environment=MCP_MODE=read
 Environment=MAX_FILE_BYTES=200000
 Environment=MAX_PATCH_BYTES=200000
+Environment=MAX_SEARCH_RESULTS=50
+Environment=MAX_OUTPUT_BYTES=200000
 Environment=ALLOW_DIRTY_WORKTREE=false
 Environment=AUDIT_LOG=/var/log/repo-mcp/audit.log
-ExecStart=/opt/local-repo-mcp/.venv/bin/python /opt/local-repo-mcp/server.py
+ExecStart=/opt/local-repo-mcp/.venv/bin/python /opt/local-repo-mcp/launch_mcp.py
 Restart=always
 RestartSec=3
 NoNewPrivileges=true

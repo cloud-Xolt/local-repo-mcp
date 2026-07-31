@@ -1,28 +1,25 @@
 ---
-description: Local Repo MCP 安全运行时约束 — 每次代码生成前必读
+description: Lightweight local repo MCP security constraints
 alwaysApply: true
 ---
 
-# Local Repo MCP 安全约束
+# Local Repo MCP — Lightweight Security Runtime
 
-修改前读 `CONTRIBUTING.md` 与 `AGENTS.md`。
+Read `AGENTS.md` before any code change.
 
-## 禁止
+## Scope
 
-- 任意 shell、`shell=True`、绕过 Policy/RBAC/Risk/Sandbox/路径检查
-- `write_file`、`run_command(任意字符串)`、自动 git push/commit
-- 删除 `tests/test_*.py` 中的安全验收用例
+Single-repo MCP server: safe read, filtered git, validated text patch, optional trusted-repo tests.
 
-## 必须
+## Never add
 
-- 新 Tool：Schema + 权限 + 风险 + Policy + RBAC + `audit_tool()` + 测试
-- 写：prepare → approve → apply；Patch 目标用 `git apply --stat`
-- 分支：写入仅在 `agent/{session_id}`
-- 策略：`config/policy.yaml`（含 rbac、risk 节）
-- 代码位置：`src/tools/`、`src/security/`、`src/mcp_app/server.py`
+Session, RBAC, risk scoring, policy YAML, agent branches, patch approval workflow, Docker sandbox, shell tools, tunnel auto-download, persisted API keys.
 
-## 调用链
+## Always enforce
 
-```
-Tool → RBAC → Policy → Session → Risk → Execute → Audit
-```
+- Relative paths only; reject `..`, absolute paths, symlinks
+- `guard.py` denylist for read/write
+- Filter git status and diff
+- Ripgrep: `--fixed-strings`, `-e`, `--`, `shell=False`
+- Single-step `repo_apply_patch` only
+- Seven MCP tools only
