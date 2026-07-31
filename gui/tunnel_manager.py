@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -14,9 +13,56 @@ ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "launch_mcp.py"
 
 
+def _resolve_python(python: Path | None = None) -> Path:
+    if python is not None:
+        return python.resolve()
+    venv_python = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if venv_python.is_file():
+        return venv_python.resolve()
+    return Path(sys.executable).resolve()
+
+
 class TunnelManager:
     def __init__(self, processes: ProcessManager) -> None:
         self.processes = processes
+
+    @staticmethod
+    def build_mcp_command(python: Path | None = None) -> list[str]:
+        py = _resolve_python(python)
+        return [str(py), str(LAUNCHER.resolve())]
+
+    @staticmethod
+    def profile_path(config: AppConfig) -> Path:
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        return base / "tunnel-client" / f"{config.tunnel_profile.strip() or 'local-repo'}.yaml"
+
+    @staticmethod
+    def stdio_command_text(python: Path | None = None) -> str:
+        parts = TunnelManager.build_mcp_command(python)
+        return " ".join(Path(part).as_posix() for part in parts)
+
+    def repair_profile_command(self, config: AppConfig) -> bool:
+        if config.transport != "stdio":
+            return False
+        path = self.profile_path(config)
+        if not path.is_file():
+            return False
+        expected = self.stdio_command_text()
+        content = path.read_text(encoding="utf-8")
+        if expected in content and '\\"' not in content and "G:tmp" not in content:
+            return False
+        import re
+
+        new_content, count = re.subn(
+            r"(?m)^(\s*command:\s*).*$",
+            lambda match: f'{match.group(1)}"{expected}"',
+            content,
+            count=1,
+        )
+        if count:
+            path.write_text(new_content, encoding="utf-8")
+            return True
+        return False
 
     @staticmethod
     def resolve_executable(config: AppConfig) -> str:
@@ -48,11 +94,6 @@ class TunnelManager:
         env["CONTROL_PLANE_API_KEY"] = config.control_plane_api_key.strip()
         return env
 
-    @staticmethod
-    def _stdio_command_text() -> str:
-        command = [sys.executable, str(LAUNCHER)]
-        return subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
-
     def init_profile(self, config: AppConfig) -> str:
         executable = self.resolve_executable(config)
         if not config.tunnel_id.strip():
@@ -66,7 +107,7 @@ class TunnelManager:
         if config.transport == "stdio":
             command.extend([
                 "--sample", "sample_mcp_stdio_local",
-                "--mcp-command", self._stdio_command_text(),
+                "--mcp-command", self.stdio_command_text(),
             ])
         else:
             if config.http_auth_mode == "bearer":
@@ -84,7 +125,25 @@ class TunnelManager:
             raise RuntimeError(output or "tunnel-client init failed")
         return output or "Profile initialized"
 
+    def detect(self, config: AppConfig) -> str:
+        version = self.version(config)
+        path = self.profile_path(config)
+        if not path.is_file():
+            return version
+        repair_note = ""
+        if self.repair_profile_command(config):
+            repair_note = "Repaired MCP command in profile.\n\n"
+        if not config.control_plane_api_key.strip():
+            return (
+                f"{version}\n\n{repair_note}"
+                f"Profile found: {path}\n"
+                "Set Runtime API Key, then run Doctor for full validation."
+            )
+        doctor = self.doctor(config)
+        return f"{version}\n\n{repair_note}{doctor}"
+
     def doctor(self, config: AppConfig) -> str:
+        self.repair_profile_command(config)
         executable = self.resolve_executable(config)
         result = subprocess.run(
             [executable, "doctor", "--profile", config.tunnel_profile.strip(), "--explain"],

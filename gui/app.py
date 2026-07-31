@@ -14,6 +14,7 @@ from typing import Callable
 import customtkinter as ctk
 
 from gui.config import AppConfig, load_config, save_config
+from gui.dialogs import show_result_dialog
 from gui.i18n import tr
 from gui.process_manager import ProcessManager, format_uptime
 from gui.smoke_test import run_smoke_test
@@ -658,17 +659,29 @@ class LocalRepoMCPApp(ctk.CTk):
     def _detect_tunnel(self) -> None:
         cfg = self._collect_config()
         if cfg:
-            self._run_background(lambda: self.tunnel.version(cfg), on_success=lambda value: self._set_status(value, COLORS["success"]))
+            title = self.t("detect")
+            self._run_background(
+                lambda: self.tunnel.detect(cfg),
+                on_success=lambda value, dialog_title=title: self._show_result(value, dialog_title),
+            )
 
     def _init_tunnel(self) -> None:
         cfg = self._save()
         if cfg:
-            self._run_background(lambda: self.tunnel.init_profile(cfg), on_success=lambda value: self._show_result(value))
+            title = self.t("initialize")
+            self._run_background(
+                lambda: self.tunnel.init_profile(cfg),
+                on_success=lambda value, dialog_title=title: self._show_result(value, dialog_title),
+            )
 
     def _doctor_tunnel(self) -> None:
         cfg = self._collect_config()
         if cfg:
-            self._run_background(lambda: self.tunnel.doctor(cfg), on_success=lambda value: self._show_result(value))
+            title = self.t("doctor")
+            self._run_background(
+                lambda: self.tunnel.doctor(cfg),
+                on_success=lambda value, dialog_title=title: self._show_result(value, dialog_title),
+            )
 
     def _start_tunnel(self) -> None:
         cfg = self._save()
@@ -689,16 +702,24 @@ class LocalRepoMCPApp(ctk.CTk):
             try:
                 result = task()
             except Exception as exc:  # GUI boundary: show actionable error
-                self.after(0, lambda: self._operation_failed(str(exc)))
+                self.after(0, lambda err=exc: self._operation_failed(str(err)))
                 return
-            self.after(0, lambda: self._operation_succeeded(result, success_message, on_success, rebuild))
+            self.after(0, lambda res=result: self._operation_succeeded(res, success_message, on_success, rebuild))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _operation_failed(self, error: str) -> None:
         self.busy = False
         self._set_status(error, COLORS["danger"])
-        messagebox.showerror(self.t("error"), error)
+        show_result_dialog(
+            self,
+            title=self.t("error"),
+            message=error,
+            kind="error",
+            copy_label=self.t("copy"),
+            ok_label=self.t("ok"),
+            subtitle=self.t("dialog_error"),
+        )
 
     def _operation_succeeded(self, result, message: str | None, callback: Callable | None, rebuild: bool) -> None:
         self.busy = False
@@ -711,9 +732,17 @@ class LocalRepoMCPApp(ctk.CTk):
         if rebuild:
             self._show_page(self.current_page)
 
-    def _show_result(self, value: str) -> None:
+    def _show_result(self, value: str, title: str | None = None) -> None:
         self._set_status(self.t("result_ok"), COLORS["success"])
-        messagebox.showinfo(self.t("result_ok"), value)
+        show_result_dialog(
+            self,
+            title=title or self.t("result_ok"),
+            message=value,
+            kind="success",
+            copy_label=self.t("copy"),
+            ok_label=self.t("ok"),
+            subtitle=self.t("dialog_success"),
+        )
 
     def _set_status(self, text: str, color=None) -> None:
         self.status_message = text

@@ -1,7 +1,10 @@
+import sys
+
 import pytest
+from pathlib import Path
 
 from gui.config import AppConfig
-from gui.process_manager import ProcessManager
+from gui.process_manager import ManagedProcess, ProcessManager
 from gui import tunnel_manager as tm
 
 
@@ -9,21 +12,41 @@ def test_tunnel_manager_has_no_install() -> None:
     assert not hasattr(tm.TunnelManager, "install_managed")
 
 
-def test_mcp_start_uses_launcher(monkeypatch) -> None:
+def test_http_start_uses_launcher(monkeypatch) -> None:
     captured: dict = {}
 
-    def fake_spawn(self, info, cmd, env=None, cwd=None):
-        captured["cmd"] = cmd
+    def fake_start(self, command, *, env=None, cwd=None):
+        captured["cmd"] = command
 
-    monkeypatch.setattr(ProcessManager, "_spawn", fake_spawn)
+    monkeypatch.setattr(ManagedProcess, "start", fake_start)
     pm = ProcessManager()
-    pm.start_mcp(AppConfig(repo_root="."))
+    pm.start_http(AppConfig(repo_root=".", transport="streamable-http"))
     assert any("launch_mcp.py" in part for part in captured["cmd"])
 
 
 def test_tunnel_init_mcp_command_uses_launcher() -> None:
-    manager = tm.TunnelManager()
-    cmd = manager.build_mcp_command(__import__("pathlib").Path("python"))
+    cmd = tm.TunnelManager.build_mcp_command(Path("python"))
     assert any("launch_mcp.py" in part for part in cmd)
-    assert "bash" not in " ".join(cmd)
-    assert "powershell" not in " ".join(cmd)
+    text = tm.TunnelManager.stdio_command_text(Path("python"))
+    assert "launch_mcp.py" in text
+    assert '"' not in text
+    assert "\\" not in text
+    assert "bash" not in text
+    assert "powershell" not in text
+
+
+def test_repair_profile_command_rewrites_broken_yaml(tmp_path, monkeypatch) -> None:
+    profile_dir = tmp_path / "tunnel-client"
+    profile_dir.mkdir()
+    profile = profile_dir / "local-repo.yaml"
+    profile.write_text(
+        'mcp:\n  commands:\n    - channel: main\n      command: "\\"G:/tmp/.venv/Scripts/python.exe\\" \\"G:/tmp/launch_mcp.py\\""\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config = AppConfig(repo_root=".", tunnel_profile="local-repo", transport="stdio")
+    manager = tm.TunnelManager(tm.ProcessManager())
+    assert manager.repair_profile_command(config) is True
+    saved = profile.read_text(encoding="utf-8")
+    assert '\\"' not in saved
+    assert "launch_mcp.py" in saved
