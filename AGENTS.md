@@ -1,30 +1,54 @@
-# Local Repo MCP — AI Agent 开发约束
+# Local Repo MCP — AI 开发约束
 
-**修改任何代码前，必须先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。**
+本项目是**轻量、单一用途**的本地 Git 仓库 MCP Server，不是企业 Agent Runtime。
 
-## 代码生成前检查清单
+## 产品边界
 
-1. 阅读 `CONTRIBUTING.md` 与 `.cursor/rules/security-runtime.mdc`
-2. 不绕过：Policy、RBAC、Risk Scorer、Session、Branch Sandbox、Secret Scanner、Audit、Docker Sandbox
-3. 新 Tool 必须：Schema、权限、风险等级、Policy Check、RBAC Check、Audit Event、测试
-4. 写：`repo_prepare_patch` → `repo_approve_patch` → `repo_apply_patch`
-5. 测：`repo_run_test(command_key)` + Sandbox
-6. Patch 目标仅 `git apply --stat`；写入仅在 `agent/{session_id}` 分支
+- 只服务**一个**配置的本地 Git 仓库
+- 默认 `MCP_MODE=read`
+- 仅支持 `read` / `write` / `test` 三档模式
+- 写入仅通过 `repo_apply_patch`（统一文本 Patch）
+- 可选 `repo_run_test`（仅 test 模式，白名单命令）
+- 可选 OpenAI Secure MCP Tunnel（用户自行安装 tunnel-client）
 
-## 关键模块
+## 禁止新增
 
-| 模块 | 路径 |
-|------|------|
-| 入口 | `server.py` → `src/mcp_app/server.py` |
-| Tools | `src/tools/read.py`, `patch.py`, `test.py`, `session.py` |
-| Policy | `src/security/policy_engine.py`, `config/policy.yaml` |
-| RBAC | `src/security/rbac.py` |
-| Risk | `src/security/risk.py` |
-| 测试 | `tests/test_*.py` |
+- Session / RBAC / Risk Scorer / Policy YAML
+- 自动分支 checkout / commit / push
+- 三阶段 Patch 审批
+- Docker Sandbox / 任意 Shell
+- Tunnel 自动下载
+- API Key 落盘
 
-## 验证
+## 每次修改必须
 
-```bash
-python -m pytest tests/ -v
-python server.py
+1. 路径使用 `relative_to()`，拒绝绝对路径、`..`、symlink
+2. 敏感路径使用 `src/security/guard.py` denylist
+3. Git status/diff 过滤敏感路径
+4. 搜索使用 `rg --fixed-strings -e query --`
+5. 同步更新 `tests/` 与 README
+6. 保持 MCP Tool 数量为 7 个，不随意新增
+
+## MCP Tools（仅这 7 个）
+
+```
+repo_list_files
+repo_read_file
+repo_search_code
+repo_git_status
+repo_git_diff
+repo_apply_patch
+repo_run_test
+```
+
+## 核心模块
+
+```
+src/security/guard.py    — 路径 denylist
+src/security/scanner.py  — Patch 新增行凭证 regex
+src/repo/filesystem.py   — 读取与列表
+src/repo/git.py          — 过滤后的 Git 操作
+src/tools/patch.py       — 单步 Patch
+src/tools/test_runner.py — 白名单本地测试
+launch_mcp.py            — Tunnel 固定 launcher
 ```

@@ -6,7 +6,6 @@ audit.log
 .env
 config.json
 sessions.json
-bin/tunnel-client/
 data/tunnel/
 gui/__pycache__/
 tests/**/__pycache__/

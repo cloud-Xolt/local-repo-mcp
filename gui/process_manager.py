@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -23,6 +24,12 @@ class ProcessInfo:
     @property
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
+
+    @property
+    def pid(self) -> str:
+        if not self.running or self.proc is None:
+            return "-"
+        return str(self.proc.pid)
 
     @property
     def uptime(self) -> str:
@@ -100,6 +107,7 @@ class ProcessManager:
             env=merged_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            shell=False,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         info.started_at = time.time()
@@ -109,39 +117,19 @@ class ProcessManager:
 
     def start_mcp(self, config: AppConfig) -> None:
         python = self._python_executable()
-        server = PROJECT_ROOT / "server.py"
+        launcher = PROJECT_ROOT / "launch_mcp.py"
         self._spawn(
             self.mcp,
-            [str(python), str(server)],
+            [str(python), str(launcher)],
             env=config.mcp_env(),
             cwd=PROJECT_ROOT,
         )
-
-    def _build_mcp_command(self, config: AppConfig) -> str:
-        python = self._python_executable()
-        server = PROJECT_ROOT / "server.py"
-        env_parts = " ".join(f'{k}="{v}"' for k, v in config.mcp_env().items())
-        if os.name == "nt":
-            return (
-                f'powershell -NoProfile -Command "'
-                f"Set-Location '{PROJECT_ROOT}'; "
-                f"{env_parts}; "
-                f"& '{python}' '{server}'"
-                f'"'
-            )
-        return (
-            f"bash -lc 'cd {shlex_quote(str(PROJECT_ROOT))} && "
-            f"{env_parts} {shlex_quote(str(python))} {shlex_quote(str(server))}'"
-        )
-
-    def install_tunnel(self) -> str:
-        return self.tunnel_manager.install_managed()
 
     def tunnel_status(self, config: AppConfig):
         return self.tunnel_manager.status(config)
 
     def init_tunnel(self, config: AppConfig) -> None:
-        self.tunnel_manager.init_profile(config, self._build_mcp_command)
+        self.tunnel_manager.init_profile(config, self._python_executable())
 
     def start_tunnel(self, config: AppConfig, init_first: bool = True) -> None:
         if init_first and not self.tunnel_manager.is_profile_initialized(config.tunnel_profile):
@@ -170,6 +158,10 @@ class ProcessManager:
         self.stop(self.tunnel)
         self.stop(self.mcp)
 
+    def restart_mcp(self, config: AppConfig) -> None:
+        self.stop(self.mcp)
+        self.start_mcp(config)
+
     def restart_tunnel(self, config: AppConfig) -> None:
         self.stop(self.tunnel)
         self.start_tunnel(config, init_first=False)
@@ -185,16 +177,8 @@ class ProcessManager:
         size = audit_path.stat().st_size
         if size <= last_size:
             return [], last_size
-        with audit_path.open("r", encoding="utf-8", errors="replace") as f:
-            f.seek(last_size)
-            new_text = f.read()
+        with audit_path.open("r", encoding="utf-8", errors="replace") as handle:
+            handle.seek(last_size)
+            new_text = handle.read()
         lines = [f"[audit] {line}" for line in new_text.splitlines() if line.strip()]
         return lines, size
-
-
-def shlex_quote(value: str) -> str:
-    if os.name == "nt":
-        return value.replace("'", "''")
-    import shlex
-
-    return shlex.quote(value)

@@ -1,20 +1,24 @@
+from __future__ import annotations
+
 import hashlib
 import json
-import re
+import os
 import time
 from pathlib import Path
 from typing import Any
 
-SENSITIVE_KEY_PATTERN = re.compile(r"(token|password|secret|key|credential|authorization)", re.I)
-SENSITIVE_VALUE_PATTERN = re.compile(
-    r"(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.)"
-)
-
 
 class AuditLogger:
     def __init__(self, log_path: str) -> None:
-        self.log_path = Path(log_path)
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.enabled = bool(log_path.strip())
+        self.log_path = Path(log_path) if self.enabled else None
+        if self.enabled and self.log_path is not None:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            if os.name != "nt":
+                try:
+                    os.chmod(self.log_path.parent, 0o700)
+                except OSError:
+                    pass
 
     @staticmethod
     def hash_value(value: str) -> str:
@@ -22,48 +26,35 @@ class AuditLogger:
 
     hash_input = hash_value
 
-    def _redact(self, obj: Any) -> Any:
-        if isinstance(obj, dict):
-            redacted = {}
-            for key, value in obj.items():
-                if SENSITIVE_KEY_PATTERN.search(str(key)):
-                    redacted[key] = "[REDACTED]"
-                else:
-                    redacted[key] = self._redact(value)
-            return redacted
-        if isinstance(obj, list):
-            return [self._redact(item) for item in obj]
-        if isinstance(obj, str):
-            if len(obj) > 500:
-                obj = obj[:500] + "…"
-            return SENSITIVE_VALUE_PATTERN.sub("[REDACTED]", obj)
-        return obj
-
     def log(
         self,
+        *,
         tool: str,
-        session_id: str,
-        payload: dict[str, Any],
-        result: str,
-        risk_level: str = "low",
-        target_files: list[str] | None = None,
+        status: str,
+        target: str | None = None,
+        targets: list[str] | None = None,
+        input_bytes: int = 0,
         input_hash: str = "",
         result_hash: str = "",
-        risk_score: int = 0,
-        risk_factors: list[str] | None = None,
     ) -> None:
-        record = {
-            "session_id": session_id or "",
-            "tool": tool,
+        if not self.enabled or self.log_path is None:
+            return
+
+        record: dict[str, Any] = {
             "timestamp": int(time.time()),
+            "tool": tool,
+            "status": status,
+            "target": target,
+            "targets": targets or [],
+            "input_bytes": input_bytes,
             "input_hash": input_hash,
             "result_hash": result_hash,
-            "target_files": target_files or [],
-            "result": result,
-            "risk": risk_level,
-            "risk_score": risk_score,
-            "risk_factors": risk_factors or [],
-            "payload": self._redact(payload),
         }
-        with self.log_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        with self.log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        if os.name != "nt":
+            try:
+                os.chmod(self.log_path, 0o600)
+            except OSError:
+                pass

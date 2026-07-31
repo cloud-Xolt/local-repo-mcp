@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=repo-mcp
 Group=repo-mcp
-Environment=CONTROL_PLANE_API_KEY=sk-REPLACE_ME
+EnvironmentFile=/etc/local-repo-mcp/tunnel.env
 ExecStart=/usr/local/bin/tunnel-client run --profile local-repo
 Restart=always
 RestartSec=5
@@ -15,7 +15,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/tunnel-client /var/log/tunnel-client /opt/local-repo-mcp /opt/repos/project-a
+ReadWritePaths=/var/lib/tunnel-client
 
 [Install]
 WantedBy=multi-user.target
