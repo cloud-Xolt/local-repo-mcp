@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import customtkinter as ctk
 
-from gui.theme import COLORS
+from gui.theme import BTN_HEIGHT, COLORS, FONT_BODY, FONT_SECTION
 
 _KIND_META = {
     "success": ("✓", COLORS["success"]),
@@ -55,7 +55,7 @@ class ResultDialog(ctk.CTkToplevel):
         badge.grid(row=0, column=0, rowspan=2, padx=(20, 14), pady=18, sticky="w")
 
         ctk.CTkLabel(
-            header, text=title, font=ctk.CTkFont(size=20, weight="bold"),
+            header, text=title, font=ctk.CTkFont(size=FONT_SECTION + 2, weight="bold"),
             text_color=COLORS["text"], anchor="w",
         ).grid(row=0, column=1, padx=(0, 20), pady=(18, 4), sticky="ew")
 
@@ -67,7 +67,7 @@ class ResultDialog(ctk.CTkToplevel):
                 "warning": "Please review",
             }.get(kind, "Details")
         ctk.CTkLabel(
-            header, text=subtitle, font=ctk.CTkFont(size=13),
+            header, text=subtitle, font=ctk.CTkFont(size=FONT_BODY),
             text_color=COLORS["muted"], anchor="w",
         ).grid(row=1, column=1, padx=(0, 20), pady=(0, 18), sticky="ew")
 
@@ -81,7 +81,7 @@ class ResultDialog(ctk.CTkToplevel):
 
         mono = "Consolas" if parent.tk.call("tk", "windowingsystem") == "win32" else "monospace"
         self.textbox = ctk.CTkTextbox(
-            body, font=(mono, 13), fg_color=COLORS["surface_alt"],
+            body, font=(mono, FONT_BODY), fg_color=COLORS["surface_alt"],
             border_width=1, border_color=COLORS["border"], corner_radius=10,
             wrap="word",
         )
@@ -93,14 +93,16 @@ class ResultDialog(ctk.CTkToplevel):
         footer.grid(row=2, column=0, sticky="e", pady=(12, 0))
 
         ctk.CTkButton(
-            footer, text=copy_label, width=96, height=36,
+            footer, text=copy_label, width=104, height=BTN_HEIGHT,
+            font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
             fg_color="transparent", border_width=1, border_color=COLORS["border"],
             text_color=COLORS["text"], hover_color=COLORS["surface_alt"],
             command=self._copy,
         ).pack(side="left", padx=(0, 8))
 
         ok_btn = ctk.CTkButton(
-            footer, text=ok_label, width=96, height=36,
+            footer, text=ok_label, width=104, height=BTN_HEIGHT,
+            font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
             fg_color=COLORS["primary"], hover_color=COLORS["primary_hover"],
             command=self.destroy,
         )

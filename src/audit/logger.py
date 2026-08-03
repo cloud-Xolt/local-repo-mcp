@@ -3,20 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 
 class AuditLogger:
-    """Small metadata-only JSONL audit logger.
-
-    It intentionally never stores file contents, patches, search queries,
-    credentials, or process output.
-    """
+    """Metadata-only JSONL audit logger."""
 
     def __init__(self, path: str) -> None:
         self.path = Path(path).expanduser().resolve() if path.strip() else None
+        self._lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -29,12 +27,13 @@ class AuditLogger:
     def log(self, **record: Any) -> None:
         if self.path is None:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"timestamp": int(time.time()), **record}
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
-        if os.name != "nt":
-            try:
-                os.chmod(self.path, 0o600)
-            except OSError:
-                pass
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+            if os.name != "nt":
+                try:
+                    os.chmod(self.path, 0o600)
+                except OSError:
+                    pass

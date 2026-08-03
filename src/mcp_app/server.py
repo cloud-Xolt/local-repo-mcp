@@ -3,7 +3,6 @@ from __future__ import annotations
 import hmac
 import os
 import subprocess
-from pathlib import Path
 
 from mcp.server import MCPServer
 
@@ -12,7 +11,7 @@ from tools.patch import register_patch_tools
 from tools.read import register_read_tools
 from tools.test import register_test_tools
 
-mcp = MCPServer("Local Repo MCP", version="1.1.0")
+mcp = MCPServer("Local Repo MCP", version="1.2.1")
 _ctx = build_context(mcp)
 register_read_tools(_ctx)
 register_patch_tools(_ctx)
@@ -36,7 +35,13 @@ def _validate_repo() -> None:
     try:
         result = subprocess.run(
             ["git", "-C", str(_ctx.repo_root), "rev-parse", "--is-inside-work-tree"],
-            text=True, capture_output=True, timeout=10, check=False, shell=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=10,
+            check=False,
+            shell=False,
         )
     except OSError as exc:
         raise RuntimeError("Git is required but was not found") from exc
@@ -49,26 +54,28 @@ def _run_http() -> None:
     port = int(os.environ.get("HTTP_PORT", "8000"))
     if not 1 <= port <= 65535:
         raise RuntimeError("HTTP_PORT must be between 1 and 65535")
+
     path = os.environ.get("HTTP_PATH", "/mcp").strip() or "/mcp"
     if not path.startswith("/"):
         path = "/" + path
+
     token = os.environ.get("HTTP_AUTH_TOKEN", "").strip()
-    auth_mode = os.environ.get("HTTP_AUTH_MODE", "none").strip().lower()
+    auth_mode = os.environ.get("HTTP_AUTH_MODE", "bearer").strip().lower()
     allowed_hosts = _csv_env("HTTP_ALLOWED_HOSTS")
     allowed_origins = _csv_env("HTTP_ALLOWED_ORIGINS")
     non_local = host not in {"127.0.0.1", "localhost", "::1"}
-    if non_local and auth_mode != "bearer":
-        raise RuntimeError("non-local HTTP binding requires bearer authentication")
+
+    if auth_mode != "bearer":
+        raise RuntimeError("Streamable HTTP requires bearer authentication")
+    if not token:
+        raise RuntimeError("HTTP_AUTH_MODE=bearer requires HTTP_AUTH_TOKEN")
     if non_local and not allowed_hosts:
         raise RuntimeError("non-local HTTP binding requires HTTP_ALLOWED_HOSTS")
-    if auth_mode == "bearer" and not token:
-        raise RuntimeError("HTTP_AUTH_MODE=bearer requires HTTP_AUTH_TOKEN")
 
-    # The high-level SDK provides safe localhost Host/Origin defaults. For a
-    # non-local bind, explicitly configure the transport allowlist.
     max_request_body_size = int(os.environ.get("HTTP_MAX_REQUEST_BYTES", "262144"))
     if not 1024 <= max_request_body_size <= 5_000_000:
         raise RuntimeError("HTTP_MAX_REQUEST_BYTES must be between 1024 and 5000000")
+
     kwargs: dict = {
         "streamable_http_path": path,
         "json_response": _bool_env("HTTP_JSON_RESPONSE", True),
@@ -78,31 +85,39 @@ def _run_http() -> None:
     }
     if allowed_hosts or allowed_origins:
         from mcp.server.transport_security import TransportSecuritySettings
-
         kwargs["transport_security"] = TransportSecuritySettings(
             allowed_hosts=allowed_hosts,
             allowed_origins=allowed_origins,
         )
 
     app = mcp.streamable_http_app(**kwargs)
-    if auth_mode == "bearer":
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.responses import JSONResponse
 
-        class BearerAuthMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
-                protected_paths = {path.rstrip("/"), path.rstrip("/") + "/"}
-                if request.url.path in protected_paths:
-                    expected = f"Bearer {token}"
-                    supplied = request.headers.get("authorization", "")
-                    if not hmac.compare_digest(supplied, expected):
-                        return JSONResponse({"error": "unauthorized"}, status_code=401)
-                return await call_next(request)
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
 
-        app.add_middleware(BearerAuthMiddleware)
+    class BearerAuthMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            base_path = path.rstrip("/") or "/"
+            request_path = request.url.path
+            protected = (
+                base_path == "/"
+                or request_path == base_path
+                or request_path.startswith(base_path + "/")
+            )
+            if protected:
+                expected = f"Bearer {token}"
+                supplied = request.headers.get("authorization", "")
+                if not hmac.compare_digest(supplied, expected):
+                    return JSONResponse(
+                        {"error": "unauthorized"},
+                        status_code=401,
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+            return await call_next(request)
+
+    app.add_middleware(BearerAuthMiddleware)
 
     import uvicorn
-
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

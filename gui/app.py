@@ -5,10 +5,9 @@ import os
 import subprocess
 import sys
 import threading
-import time
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import Label, PhotoImage, TclError, filedialog, messagebox
 from typing import Callable
 
 import customtkinter as ctk
@@ -18,555 +17,1071 @@ from gui.dialogs import show_result_dialog
 from gui.i18n import tr
 from gui.process_manager import ProcessManager, format_uptime
 from gui.smoke_test import run_smoke_test
-from gui.theme import COLORS
+from gui.theme import (
+    BTN_HEIGHT,
+    CARD_RADIUS,
+    COLORS,
+    CONTENT_PADX,
+    CONTROL_RADIUS,
+    FONT_BODY,
+    FONT_CAPTION,
+    FONT_PAGE,
+    FONT_SECTION,
+    FONT_SMALL,
+    FORM_PRIMARY_WEIGHT,
+    FORM_SECONDARY_WEIGHT,
+    INPUT_HEIGHT,
+    SIDEBAR_WIDTH,
+)
 from gui.tunnel_manager import TunnelManager
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "1.1.0"
+ASSETS = ROOT / "gui" / "assets"
+VERSION = "1.2.2"
 GITHUB_URL = "https://github.com/cloud-Xolt/local-repo-mcp"
+
+PAGE_SUBTITLES = {
+    "home": "home_subtitle",
+    "server": "server_subtitle",
+    "chatgpt": "chatgpt_subtitle",
+    "logs": "logs_subtitle",
+    "about": "about_subtitle",
+}
+
+NAV_ICONS = {
+    "home": "⌂",
+    "server": "◉",
+    "chatgpt": "✦",
+    "logs": "≡",
+    "about": "?",
+}
 
 
 class LocalRepoMCPApp(ctk.CTk):
     def __init__(self) -> None:
         self.config_data = load_config()
         ctk.set_appearance_mode(self.config_data.appearance)
-        ctk.set_default_color_theme("blue")
         super().__init__()
+
         self.title("Local Repo MCP")
-        self.geometry("1180x780")
-        self.minsize(980, 680)
+        self._app_icons = {
+            size: PhotoImage(file=str(ASSETS / f"app-icon-{size}.png"))
+            for size in (16, 32, 40, 64)
+        }
+        self.iconphoto(True, *(self._app_icons[size] for size in (16, 32, 64)))
+        try:
+            self.iconbitmap(default=str(ASSETS / "app-icon.ico"))
+        except TclError:
+            # iconphoto above remains the portable fallback on non-Windows Tk.
+            pass
+        self.geometry("1280x820")
+        self.minsize(1060, 700)
         self.configure(fg_color=COLORS["bg"])
 
         self.processes = ProcessManager()
         self.tunnel = TunnelManager(self.processes)
         self.current_page = "home"
         self.busy = False
-        self.advanced_open = False
         self.last_test: dict | None = None
-        self.status_message = self.t("ready")
-        self._vars_ready = False
+        self.api_key_visible = False
+        self.token_visible = False
+        self.section_state = {
+            "home_http": True,
+            "home_advanced": False,
+            "server_check": False,
+            "server_client": False,
+            "chatgpt_auth": False,
+            "about_security": False,
+        }
+        self.log_channel = "mcp"
 
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._init_variables()
         self._build_shell()
         self._show_page("home")
-        self.after(800, self._periodic_refresh)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def t(self, key: str) -> str:
         return tr(self.config_data.language, key)
 
     def _init_variables(self) -> None:
-        self.repo_var = ctk.StringVar(value=self.config_data.repo_root)
-        self.mode_var = ctk.StringVar(value=self.config_data.mcp_mode)
-        self.transport_var = ctk.StringVar(value=self.config_data.transport)
-        self.http_host_var = ctk.StringVar(value=self.config_data.http_host)
-        self.http_port_var = ctk.StringVar(value=str(self.config_data.http_port))
-        self.http_path_var = ctk.StringVar(value=self.config_data.http_path)
-        self.http_auth_var = ctk.StringVar(value=self.config_data.http_auth_mode)
-        self.http_token_var = ctk.StringVar(value=self.config_data.http_auth_token)
-        self.allowed_hosts_var = ctk.StringVar(value=self.config_data.http_allowed_hosts)
-        self.allowed_origins_var = ctk.StringVar(value=self.config_data.http_allowed_origins)
-        self.max_request_var = ctk.StringVar(value=str(self.config_data.http_max_request_bytes // 1024))
-        self.json_response_var = ctk.BooleanVar(value=self.config_data.http_json_response)
-        self.stateless_var = ctk.BooleanVar(value=self.config_data.http_stateless)
-
-        self.max_file_var = ctk.StringVar(value=str(self.config_data.max_file_bytes // 1000))
-        self.max_patch_var = ctk.StringVar(value=str(self.config_data.max_patch_bytes // 1000))
-        self.max_search_var = ctk.StringVar(value=str(self.config_data.max_search_results))
-        self.max_output_var = ctk.StringVar(value=str(self.config_data.max_output_bytes // 1000))
-        self.dirty_var = ctk.BooleanVar(value=self.config_data.allow_dirty_worktree)
-        self.audit_var = ctk.StringVar(value=self.config_data.audit_log)
-        self.test_timeout_var = ctk.StringVar(value=str(self.config_data.test_timeout_max))
-
-        self.tunnel_path_var = ctk.StringVar(value=self.config_data.tunnel_client_path)
-        self.tunnel_id_var = ctk.StringVar(value=self.config_data.tunnel_id)
-        self.tunnel_profile_var = ctk.StringVar(value=self.config_data.tunnel_profile)
-        self.api_key_var = ctk.StringVar(value=self.config_data.control_plane_api_key)
-        self.api_key_visible = False
-        self.http_token_visible = False
-        self._vars_ready = True
+        cfg = self.config_data
+        self.repo_var = ctk.StringVar(value=cfg.repo_root)
+        self.mode_var = ctk.StringVar(value=cfg.mcp_mode)
+        self.transport_var = ctk.StringVar(value=cfg.transport)
+        self.http_host_var = ctk.StringVar(value=cfg.http_host)
+        self.http_port_var = ctk.StringVar(value=str(cfg.http_port))
+        self.http_path_var = ctk.StringVar(value=cfg.http_path)
+        self.http_token_var = ctk.StringVar(value=cfg.http_auth_token)
+        self.allowed_hosts_var = ctk.StringVar(value=cfg.http_allowed_hosts)
+        self.allowed_origins_var = ctk.StringVar(value=cfg.http_allowed_origins)
+        self.max_file_var = ctk.StringVar(value=str(cfg.max_file_bytes // 1000))
+        self.max_patch_var = ctk.StringVar(value=str(cfg.max_patch_bytes // 1000))
+        self.max_search_var = ctk.StringVar(value=str(cfg.max_search_results))
+        self.max_output_var = ctk.StringVar(value=str(cfg.max_output_bytes // 1000))
+        self.test_timeout_var = ctk.StringVar(value=str(cfg.test_timeout_max))
+        self.audit_var = ctk.StringVar(value=cfg.audit_log)
+        self.dirty_var = ctk.BooleanVar(value=cfg.allow_dirty_worktree)
+        self.tunnel_path_var = ctk.StringVar(value=cfg.tunnel_client_path)
+        self.tunnel_id_var = ctk.StringVar(value=cfg.tunnel_id)
+        self.tunnel_profile_var = ctk.StringVar(value=cfg.tunnel_profile)
+        self.api_key_var = ctk.StringVar(value=cfg.control_plane_api_key)
 
     def _build_shell(self) -> None:
         for child in self.winfo_children():
             child.destroy()
 
-        self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = ctk.CTkFrame(self, width=230, corner_radius=0, fg_color=COLORS["sidebar"])
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_propagate(False)
-
-        brand = ctk.CTkLabel(
-            self.sidebar, text="◈  Local Repo MCP", font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="#FFFFFF", anchor="w",
+        sidebar = ctk.CTkFrame(
+            self,
+            width=SIDEBAR_WIDTH,
+            corner_radius=0,
+            fg_color=COLORS["sidebar"],
+            border_width=0,
         )
-        brand.pack(fill="x", padx=22, pady=(26, 28))
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        sidebar.grid_propagate(False)
+
+        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
+        brand.pack(fill="x", padx=16, pady=(22, 24))
+        Label(
+            brand,
+            image=self._app_icons[40],
+            width=40,
+            height=40,
+            background="#0B0C0D",
+            borderwidth=0,
+            highlightthickness=0,
+        ).pack(side="left")
+        brand_text = ctk.CTkFrame(brand, fg_color="transparent")
+        brand_text.pack(side="left", padx=(11, 0))
+        ctk.CTkLabel(
+            brand_text,
+            text="Local Repo MCP",
+            anchor="w",
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color=COLORS["text"],
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            brand_text,
+            text=f"v{VERSION}",
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_CAPTION),
+            text_color=COLORS["muted"],
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            sidebar,
+            text=self.t("navigation").upper(),
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_CAPTION, weight="bold"),
+            text_color=COLORS["subtle"],
+        ).pack(fill="x", padx=18, pady=(0, 8))
 
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
         for key in ("home", "server", "chatgpt", "logs", "about"):
             button = ctk.CTkButton(
-                self.sidebar, text=self.t(key), anchor="w", height=42,
-                fg_color="transparent", hover_color="#1F2937", text_color="#CBD5E1",
-                font=ctk.CTkFont(size=14), command=lambda value=key: self._show_page(value),
+                sidebar,
+                text=f"{NAV_ICONS[key]}    {self.t(key)}",
+                anchor="w",
+                height=44,
+                corner_radius=CONTROL_RADIUS,
+                border_width=0,
+                fg_color="transparent",
+                hover_color=COLORS["sidebar_hover"],
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(size=FONT_BODY),
+                command=lambda page=key: self._show_page(page),
             )
-            button.pack(fill="x", padx=12, pady=3)
+            button.pack(fill="x", padx=10, pady=2)
             self.nav_buttons[key] = button
 
-        spacer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        spacer.pack(fill="both", expand=True)
+        ctk.CTkFrame(sidebar, fg_color="transparent").pack(fill="both", expand=True)
 
-        preference = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        preference.pack(fill="x", padx=14, pady=16)
-        ctk.CTkLabel(preference, text=self.t("language"), text_color="#94A3B8", anchor="w").pack(fill="x")
+        repo_summary = ctk.CTkFrame(
+            sidebar,
+            fg_color=COLORS["surface"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        repo_summary.pack(fill="x", padx=10, pady=(0, 12))
+        ctk.CTkLabel(
+            repo_summary,
+            text=self._repo_name(),
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_SMALL, weight="bold"),
+            text_color=COLORS["text"],
+        ).pack(fill="x", padx=12, pady=(11, 2))
+        ctk.CTkLabel(
+            repo_summary,
+            text=f"{self._git_branch()}  ·  {self.mode_var.get().upper()}",
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_SMALL),
+            text_color=COLORS["muted"],
+        ).pack(fill="x", padx=12, pady=(0, 11))
+
+        prefs = ctk.CTkFrame(sidebar, fg_color="transparent")
+        prefs.pack(fill="x", padx=10, pady=(0, 16))
         language = ctk.CTkSegmentedButton(
-            preference, values=["中文", "English"], height=30,
+            prefs,
+            values=["中文", "English"],
+            height=40,
+            selected_color=COLORS["accent_soft"],
+            selected_hover_color=COLORS["surface_hover"],
+            unselected_color=COLORS["surface_alt"],
+            unselected_hover_color=COLORS["surface_hover"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=FONT_SMALL),
             command=self._change_language,
         )
         language.set("中文" if self.config_data.language == "zh" else "English")
-        language.pack(fill="x", pady=(5, 12))
+        language.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
-        ctk.CTkLabel(preference, text=self.t("appearance"), text_color="#94A3B8", anchor="w").pack(fill="x")
-        appearance_values = [self.t("system"), self.t("light"), self.t("dark")]
         appearance = ctk.CTkOptionMenu(
-            preference, values=appearance_values, height=30,
+            prefs,
+            height=40,
+            width=96,
+            values=[self.t("system"), self.t("light"), self.t("dark")],
+            fg_color=COLORS["surface_alt"],
+            button_color=COLORS["border_strong"],
+            button_hover_color=COLORS["muted"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=FONT_SMALL),
             command=self._change_appearance,
         )
-        appearance.set({
-            "system": self.t("system"), "light": self.t("light"), "dark": self.t("dark")
-        }[self.config_data.appearance])
-        appearance.pack(fill="x", pady=(5, 0))
+        appearance.set(
+            {
+                "system": self.t("system"),
+                "light": self.t("light"),
+                "dark": self.t("dark"),
+            }[self.config_data.appearance]
+        )
+        appearance.pack(side="left", padx=(4, 0))
 
         self.content = ctk.CTkFrame(self, fg_color=COLORS["bg"], corner_radius=0)
         self.content.grid(row=0, column=1, sticky="nsew")
         self.content.grid_columnconfigure(0, weight=1)
         self.content.grid_rowconfigure(1, weight=1)
 
-        self.topbar = ctk.CTkFrame(self.content, height=72, corner_radius=0, fg_color=COLORS["surface"])
-        self.topbar.grid(row=0, column=0, sticky="ew")
-        self.topbar.grid_columnconfigure(0, weight=1)
+        header = ctk.CTkFrame(self.content, fg_color="transparent", height=88)
+        header.grid(row=0, column=0, sticky="ew", padx=CONTENT_PADX, pady=(22, 4))
+        header.grid_columnconfigure(0, weight=1)
+
+        title_wrap = ctk.CTkFrame(header, fg_color="transparent")
+        title_wrap.grid(row=0, column=0, sticky="w")
         self.page_title = ctk.CTkLabel(
-            self.topbar, text="", font=ctk.CTkFont(size=22, weight="bold"),
-            text_color=COLORS["text"], anchor="w",
+            title_wrap,
+            text="",
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_PAGE, weight="bold"),
+            text_color=COLORS["text"],
         )
-        self.page_title.grid(row=0, column=0, padx=28, pady=20, sticky="w")
+        self.page_title.pack(anchor="w")
+        self.page_subtitle = ctk.CTkLabel(
+            title_wrap,
+            text="",
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_BODY),
+            text_color=COLORS["muted"],
+        )
+        self.page_subtitle.pack(anchor="w", pady=(3, 0))
+
         self.banner = ctk.CTkLabel(
-            self.topbar, text=self.status_message, text_color=COLORS["muted"], anchor="e",
+            header,
+            text=self.t("ready"),
+            height=30,
+            corner_radius=15,
+            fg_color=COLORS["surface_alt"],
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=FONT_SMALL, weight="bold"),
         )
-        self.banner.grid(row=0, column=1, padx=28, pady=20, sticky="e")
+        self.banner.grid(row=0, column=1, sticky="e", padx=(16, 0))
 
         self.page_container = ctk.CTkFrame(self.content, fg_color="transparent")
-        self.page_container.grid(row=1, column=0, sticky="nsew", padx=24, pady=20)
+        self.page_container.grid(
+            row=1,
+            column=0,
+            padx=CONTENT_PADX,
+            pady=(10, 28),
+            sticky="nsew",
+        )
         self.page_container.grid_columnconfigure(0, weight=1)
         self.page_container.grid_rowconfigure(0, weight=1)
 
     def _show_page(self, page: str) -> None:
         self.current_page = page
         for key, button in self.nav_buttons.items():
+            active = key == page
             button.configure(
-                fg_color="#2563EB" if key == page else "transparent",
-                text_color="#FFFFFF" if key == page else "#CBD5E1",
+                fg_color=COLORS["sidebar_active"] if active else "transparent",
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(size=FONT_BODY, weight="bold" if active else "normal"),
             )
         self.page_title.configure(text=self.t(page))
+        self.page_subtitle.configure(text=self.t(PAGE_SUBTITLES[page]))
+
         for child in self.page_container.winfo_children():
             child.destroy()
-        builders = {
+
+        {
             "home": self._build_home,
             "server": self._build_server,
             "chatgpt": self._build_chatgpt,
             "logs": self._build_logs,
             "about": self._build_about,
-        }
-        builders[page]()
+        }[page]()
 
-    def _scroll_page(self) -> ctk.CTkScrollableFrame:
-        frame = ctk.CTkScrollableFrame(self.page_container, fg_color="transparent", corner_radius=0)
+    def _page(self):
+        frame = ctk.CTkScrollableFrame(
+            self.page_container,
+            fg_color="transparent",
+            corner_radius=0,
+            scrollbar_button_color=COLORS["border_strong"],
+            scrollbar_button_hover_color=COLORS["muted"],
+        )
         frame.grid(row=0, column=0, sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
         return frame
 
-    def _card(self, parent, title: str | None = None) -> ctk.CTkFrame:
+    def _card(
+        self,
+        parent,
+        title: str,
+        subtitle: str = "",
+        *,
+        row: int,
+        column: int = 0,
+        columnspan: int = 1,
+    ):
         card = ctk.CTkFrame(
-            parent, fg_color=COLORS["surface"], border_width=1,
-            border_color=COLORS["border"], corner_radius=12,
+            parent,
+            fg_color=COLORS["surface"],
+            corner_radius=CARD_RADIUS,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        card.grid(
+            row=row,
+            column=column,
+            columnspan=columnspan,
+            padx=(0, 8) if column == 0 and columnspan == 1 else (8, 0) if column == 1 else 0,
+            pady=(0, 12),
+            sticky="nsew",
         )
         card.grid_columnconfigure(0, weight=1)
-        if title:
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 10))
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header,
+            text=title,
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_SECTION, weight="bold"),
+            text_color=COLORS["text"],
+        ).grid(row=0, column=0, sticky="w")
+        if subtitle:
             ctk.CTkLabel(
-                card, text=title, font=ctk.CTkFont(size=16, weight="bold"),
-                text_color=COLORS["text"], anchor="w",
-            ).grid(row=0, column=0, columnspan=4, padx=20, pady=(18, 12), sticky="ew")
-        return card
+                header,
+                text=subtitle,
+                anchor="w",
+                justify="left",
+                wraplength=720,
+                font=ctk.CTkFont(size=FONT_SMALL),
+                text_color=COLORS["muted"],
+            ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        body.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        body.grid_columnconfigure(0, weight=1)
+        return card, body
 
-    def _entry_row(self, parent, row: int, label: str, variable, *, browse: Callable | None = None, show: str | None = None):
-        ctk.CTkLabel(parent, text=label, text_color=COLORS["text"], anchor="w").grid(
-            row=row, column=0, padx=(20, 12), pady=8, sticky="w"
+    def _collapsible(
+        self,
+        parent,
+        key: str,
+        title: str,
+        subtitle: str,
+        *,
+        row: int,
+        columnspan: int = 2,
+    ):
+        card = ctk.CTkFrame(
+            parent,
+            fg_color=COLORS["surface"],
+            corner_radius=CARD_RADIUS,
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        entry = ctk.CTkEntry(parent, textvariable=variable, show=show, height=36)
-        entry.grid(row=row, column=1, columnspan=2 if browse is None else 1, padx=8, pady=8, sticky="ew")
-        if browse is not None:
-            ctk.CTkButton(parent, text=self.t("browse"), width=90, height=36, command=browse).grid(
-                row=row, column=2, padx=(8, 20), pady=8
-            )
-        else:
-            entry.grid_configure(padx=(8, 20))
-        parent.grid_columnconfigure(1, weight=1)
+        card.grid(
+            row=row,
+            column=0,
+            columnspan=columnspan,
+            pady=(0, 12),
+            sticky="ew",
+        )
+        card.grid_columnconfigure(0, weight=1)
+        expanded = self.section_state.get(key, False)
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=20, pady=16)
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header,
+            text=title,
+            anchor="w",
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color=COLORS["text"],
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            header,
+            text=subtitle,
+            anchor="w",
+            justify="left",
+            font=ctk.CTkFont(size=FONT_SMALL),
+            text_color=COLORS["muted"],
+        ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+        ctk.CTkButton(
+            header,
+            text=f"{'⌃' if expanded else '⌄'}  {self.t('collapse') if expanded else self.t('expand')}",
+            width=84,
+            height=38,
+            corner_radius=CONTROL_RADIUS,
+            fg_color="transparent",
+            hover_color=COLORS["surface_hover"],
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=FONT_SMALL),
+            command=lambda: self._toggle_section(key),
+        ).grid(row=0, column=1, rowspan=2, sticky="e")
+        if not expanded:
+            return card, None
+
+        divider = ctk.CTkFrame(card, height=1, fg_color=COLORS["border"])
+        divider.grid(row=1, column=0, sticky="ew")
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        body.grid(row=2, column=0, sticky="ew", padx=20, pady=18)
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_columnconfigure(1, weight=1)
+        return card, body
+
+    def _toggle_section(self, key: str) -> None:
+        self.section_state[key] = not self.section_state.get(key, False)
+        self._show_page(self.current_page)
+
+    def _field(
+        self,
+        parent,
+        label: str,
+        variable,
+        *,
+        row: int,
+        column: int = 0,
+        columnspan: int = 1,
+        show: str | None = None,
+        button_text: str | None = None,
+        button_command: Callable | None = None,
+    ):
+        wrap = ctk.CTkFrame(parent, fg_color="transparent")
+        wrap.grid(
+            row=row,
+            column=column,
+            columnspan=columnspan,
+            padx=(0, 8) if column == 0 and columnspan == 1 else (8, 0) if column == 1 else 0,
+            pady=6,
+            sticky="ew",
+        )
+        wrap.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            wrap,
+            text=label,
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_SMALL, weight="bold"),
+            text_color=COLORS["muted"],
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
+        entry = ctk.CTkEntry(
+            wrap,
+            textvariable=variable,
+            height=INPUT_HEIGHT,
+            corner_radius=CONTROL_RADIUS,
+            border_width=1,
+            border_color=COLORS["border"],
+            fg_color=COLORS["surface_alt"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=FONT_BODY),
+            show=show,
+        )
+        entry.grid(row=1, column=0, sticky="ew")
+        if button_text and button_command:
+            ctk.CTkButton(
+                wrap,
+                text=button_text,
+                width=92,
+                height=INPUT_HEIGHT,
+                corner_radius=CONTROL_RADIUS,
+                fg_color=COLORS["surface_alt"],
+                hover_color=COLORS["surface_hover"],
+                border_width=1,
+                border_color=COLORS["border"],
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
+                command=button_command,
+            ).grid(row=1, column=1, padx=(8, 0))
         return entry
 
-    def _build_home(self) -> None:
-        page = self._scroll_page()
-
-        repo_card = self._card(page, self.t("repository"))
-        repo_card.grid(row=0, column=0, sticky="ew", pady=(0, 14))
-        repo_entry = self._entry_row(repo_card, 1, self.t("path"), self.repo_var, browse=self._browse_repo)
-        repo_entry.configure(placeholder_text=self.t("repository_hint"))
-        ctk.CTkButton(
-            repo_card, text=self.t("open_folder"), fg_color="transparent",
-            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
-            command=self._open_repo,
-        ).grid(row=2, column=2, padx=(8, 20), pady=(4, 16), sticky="e")
-        self.branch_label = ctk.CTkLabel(repo_card, text=f"{self.t('current_branch')}: {self._git_branch()}", text_color=COLORS["muted"])
-        self.branch_label.grid(row=2, column=0, columnspan=2, padx=20, pady=(4, 16), sticky="w")
-
-        mode_card = self._card(page, self.t("access_mode"))
-        mode_card.grid(row=1, column=0, sticky="ew", pady=14)
-        mode_values = [self.t("mode_read"), self.t("mode_write"), self.t("mode_test")]
-        self.mode_segment = ctk.CTkSegmentedButton(
-            mode_card, values=mode_values, height=38, command=self._mode_changed,
+    def _primary_button(self, parent, text: str, command: Callable, *, danger: bool = False):
+        return ctk.CTkButton(
+            parent,
+            text=text,
+            height=BTN_HEIGHT,
+            corner_radius=CONTROL_RADIUS,
+            fg_color=COLORS["danger"] if danger else COLORS["primary"],
+            hover_color=COLORS["danger_hover"] if danger else COLORS["primary_hover"],
+            text_color="#FFFFFF" if danger else COLORS["primary_text"],
+            font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
+            command=command,
         )
-        self.mode_segment.set({
-            "read": self.t("mode_read"), "write": self.t("mode_write"), "test": self.t("mode_test")
-        }[self.mode_var.get()])
-        self.mode_segment.grid(row=1, column=0, columnspan=4, padx=20, pady=(2, 10), sticky="ew")
-        self.mode_help = ctk.CTkLabel(mode_card, text="", text_color=COLORS["muted"], anchor="w", justify="left")
-        self.mode_help.grid(row=2, column=0, columnspan=4, padx=20, pady=(0, 18), sticky="ew")
-        self._update_mode_help()
 
-        transport_card = self._card(page, self.t("transport"))
-        transport_card.grid(row=2, column=0, sticky="ew", pady=14)
-        transport_values = [self.t("stdio"), self.t("http")]
-        self.transport_segment = ctk.CTkSegmentedButton(
-            transport_card, values=transport_values, height=38, command=self._transport_changed,
+    def _secondary_button(self, parent, text: str, command: Callable):
+        return ctk.CTkButton(
+            parent,
+            text=text,
+            height=BTN_HEIGHT,
+            corner_radius=CONTROL_RADIUS,
+            fg_color="transparent",
+            hover_color=COLORS["surface_hover"],
+            border_width=1,
+            border_color=COLORS["border_strong"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
+            command=command,
         )
-        self.transport_segment.set(self.t("stdio") if self.transport_var.get() == "stdio" else self.t("http"))
-        self.transport_segment.grid(row=1, column=0, columnspan=4, padx=20, pady=(2, 10), sticky="ew")
-        transport_desc = self.t("stdio_desc") if self.transport_var.get() == "stdio" else self.t("http_desc")
+
+    def _metric(self, parent, title: str, value: str, *, row: int, column: int):
+        frame = ctk.CTkFrame(
+            parent,
+            fg_color=COLORS["surface_alt"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        frame.grid(row=row, column=column, padx=5, pady=5, sticky="nsew")
+        parent.grid_columnconfigure(column, weight=1)
         ctk.CTkLabel(
-            transport_card, text=transport_desc, text_color=COLORS["muted"], anchor="w", justify="left"
-        ).grid(row=2, column=0, columnspan=4, padx=20, pady=(0, 12), sticky="ew")
+            frame,
+            text=title,
+            anchor="w",
+            font=ctk.CTkFont(size=FONT_CAPTION, weight="bold"),
+            text_color=COLORS["muted"],
+        ).pack(fill="x", padx=12, pady=(11, 3))
+        ctk.CTkLabel(
+            frame,
+            text=value,
+            anchor="w",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=COLORS["text"],
+        ).pack(fill="x", padx=12, pady=(0, 11))
+
+    def _build_home(self) -> None:
+        page = self._page()
+
+        _, workspace = self._card(
+            page,
+            self.t("workspace"),
+            self.t("workspace_hint"),
+            row=0,
+            columnspan=2,
+        )
+        self._field(
+            workspace,
+            self.t("repository"),
+            self.repo_var,
+            row=0,
+            columnspan=2,
+            button_text=self.t("browse"),
+            button_command=self._browse_repo,
+        )
+        summary = ctk.CTkFrame(workspace, fg_color="transparent")
+        summary.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        for text in (
+            f"{self.t('current_branch')}: {self._git_branch()}",
+            f"{self.t('mode')}: {self.mode_var.get()}",
+            f"{self.t('transport')}: {self.transport_var.get()}",
+        ):
+            ctk.CTkLabel(
+                summary,
+                text=text,
+                height=27,
+                corner_radius=8,
+                fg_color=COLORS["surface_alt"],
+                text_color=COLORS["muted"],
+                font=ctk.CTkFont(size=FONT_CAPTION, weight="bold"),
+            ).pack(side="left", padx=(0, 7))
+
+        _, access = self._card(
+            page,
+            self.t("access_mode"),
+            self.t("access_hint"),
+            row=1,
+            column=0,
+        )
+        labels = [self.t("mode_read"), self.t("mode_write"), self.t("mode_test")]
+        mapping = dict(zip(labels, ("read", "write", "test")))
+        reverse = {value: key for key, value in mapping.items()}
+        selector = ctk.CTkSegmentedButton(
+            access,
+            values=labels,
+            height=44,
+            selected_color=COLORS["accent_soft"],
+            selected_hover_color=COLORS["surface_hover"],
+            unselected_color=COLORS["surface_alt"],
+            unselected_hover_color=COLORS["surface_hover"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=FONT_BODY),
+            command=lambda value: self.mode_var.set(mapping[value]),
+        )
+        selector.set(reverse[self.mode_var.get()])
+        selector.grid(row=0, column=0, sticky="ew")
+
+        _, transport = self._card(
+            page,
+            self.t("transport"),
+            self.t("transport_hint"),
+            row=1,
+            column=1,
+        )
+        transport_selector = ctk.CTkSegmentedButton(
+            transport,
+            values=[self.t("stdio"), self.t("http")],
+            height=44,
+            selected_color=COLORS["accent_soft"],
+            selected_hover_color=COLORS["surface_hover"],
+            unselected_color=COLORS["surface_alt"],
+            unselected_hover_color=COLORS["surface_hover"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=FONT_BODY),
+            command=self._transport_changed,
+        )
+        transport_selector.set(
+            self.t("stdio") if self.transport_var.get() == "stdio" else self.t("http")
+        )
+        transport_selector.grid(row=0, column=0, sticky="ew")
+
+        next_row = 2
         if self.transport_var.get() == "streamable-http":
-            self._build_http_common(transport_card, start_row=3)
+            _, http_body = self._collapsible(
+                page,
+                "home_http",
+                self.t("http_settings"),
+                self.t("http_settings_hint"),
+                row=next_row,
+            )
+            if http_body is not None:
+                self._field(http_body, self.t("http_host"), self.http_host_var, row=0, column=0)
+                self._field(http_body, self.t("http_port"), self.http_port_var, row=0, column=1)
+                self._field(http_body, self.t("http_path"), self.http_path_var, row=1, column=0)
+                self._field(
+                    http_body,
+                    self.t("http_token"),
+                    self.http_token_var,
+                    row=1,
+                    column=1,
+                    show="" if self.token_visible else "•",
+                )
+                token_actions = ctk.CTkFrame(http_body, fg_color="transparent")
+                token_actions.grid(row=2, column=0, columnspan=2, sticky="e", pady=(8, 0))
+                self._secondary_button(
+                    token_actions,
+                    self.t("hide") if self.token_visible else self.t("show"),
+                    self._toggle_token,
+                ).pack(side="left", padx=4)
+                self._secondary_button(
+                    token_actions,
+                    self.t("regenerate"),
+                    self._generate_token,
+                ).pack(side="left", padx=4)
+            next_row += 1
 
-        advanced_button = ctk.CTkButton(
-            page, text=("▾ " if self.advanced_open else "▸ ") + self.t("advanced"),
-            fg_color="transparent", hover_color=COLORS["surface_alt"], text_color=COLORS["primary"],
-            anchor="w", command=self._toggle_advanced,
+        _, advanced = self._collapsible(
+            page,
+            "home_advanced",
+            self.t("advanced"),
+            self.t("advanced_hint"),
+            row=next_row,
         )
-        advanced_button.grid(row=3, column=0, sticky="ew", pady=(8, 2))
-        if self.advanced_open:
-            advanced_card = self._card(page)
-            advanced_card.grid(row=4, column=0, sticky="ew", pady=(2, 14))
-            self._build_advanced(advanced_card)
+        if advanced is not None:
+            self._field(advanced, self.t("max_file"), self.max_file_var, row=0, column=0)
+            self._field(advanced, self.t("max_patch"), self.max_patch_var, row=0, column=1)
+            self._field(advanced, self.t("max_search"), self.max_search_var, row=1, column=0)
+            self._field(advanced, self.t("max_output"), self.max_output_var, row=1, column=1)
+            self._field(advanced, self.t("test_timeout"), self.test_timeout_var, row=2, column=0)
+            self._field(advanced, self.t("audit_log"), self.audit_var, row=2, column=1)
+            warning = ctk.CTkFrame(
+                advanced,
+                fg_color=COLORS["warning_soft"],
+                corner_radius=10,
+            )
+            warning.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            ctk.CTkSwitch(
+                warning,
+                text=self.t("dirty_worktree"),
+                variable=self.dirty_var,
+                progress_color=COLORS["warning"],
+                button_color=COLORS["surface"],
+                button_hover_color=COLORS["surface"],
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(size=FONT_BODY),
+            ).pack(anchor="w", padx=12, pady=(11, 3))
+            ctk.CTkLabel(
+                warning,
+                text=self.t("dirty_warning"),
+                text_color=COLORS["muted"],
+                font=ctk.CTkFont(size=FONT_SMALL),
+            ).pack(anchor="w", padx=12, pady=(0, 11))
 
-        actions = ctk.CTkFrame(page, fg_color="transparent")
-        actions.grid(row=5, column=0, sticky="ew", pady=(14, 26))
-        actions.grid_columnconfigure(0, weight=1)
-        ctk.CTkButton(
-            actions, text=self.t("save_restart") if self.processes.mcp.running else self.t("save"),
-            height=42, command=self._save_action,
-        ).grid(row=0, column=1, padx=6)
+        action_bar = ctk.CTkFrame(
+            page,
+            fg_color=COLORS["surface"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        action_bar.grid(
+            row=next_row + 1,
+            column=0,
+            columnspan=2,
+            pady=(2, 10),
+            sticky="ew",
+        )
+        ctk.CTkLabel(
+            action_bar,
+            text=self._repo_name(),
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=FONT_SMALL),
+        ).pack(side="left", padx=16, pady=13)
+        self._primary_button(action_bar, self.t("save"), self._save_action).pack(
+            side="right", padx=(6, 14), pady=9
+        )
+        self._secondary_button(action_bar, self.t("run_test"), self._run_smoke_test).pack(
+            side="right", padx=3, pady=9
+        )
         if self.transport_var.get() == "streamable-http":
-            if self.processes.mcp.running:
-                ctk.CTkButton(
-                    actions, text=self.t("stop_http"), height=42, fg_color=COLORS["danger"],
-                    hover_color="#B91C1C", command=self._stop_http,
-                ).grid(row=0, column=2, padx=6)
-            else:
-                ctk.CTkButton(
-                    actions, text=self.t("start_http"), height=42, command=self._start_http,
-                ).grid(row=0, column=2, padx=6)
-        ctk.CTkButton(
-            actions, text=self.t("run_test"), height=42, fg_color="transparent",
-            border_width=1, border_color=COLORS["border"], text_color=COLORS["text"],
-            command=self._run_smoke_test,
-        ).grid(row=0, column=3, padx=(6, 0))
-
-    def _build_http_common(self, card, start_row: int) -> None:
-        ctk.CTkLabel(card, text=self.t("http_host"), text_color=COLORS["text"]).grid(
-            row=start_row, column=0, padx=(20, 8), pady=8, sticky="w"
-        )
-        ctk.CTkEntry(card, textvariable=self.http_host_var, width=180).grid(
-            row=start_row, column=1, padx=8, pady=8, sticky="ew"
-        )
-        ctk.CTkLabel(card, text=self.t("http_port"), text_color=COLORS["text"]).grid(
-            row=start_row, column=2, padx=(18, 8), pady=8, sticky="w"
-        )
-        ctk.CTkEntry(card, textvariable=self.http_port_var, width=120).grid(
-            row=start_row, column=3, padx=(8, 20), pady=8, sticky="ew"
-        )
-        ctk.CTkLabel(card, text=self.t("http_path"), text_color=COLORS["text"]).grid(
-            row=start_row + 1, column=0, padx=(20, 8), pady=8, sticky="w"
-        )
-        ctk.CTkEntry(card, textvariable=self.http_path_var).grid(
-            row=start_row + 1, column=1, padx=8, pady=8, sticky="ew"
-        )
-        ctk.CTkLabel(card, text=self.t("http_auth"), text_color=COLORS["text"]).grid(
-            row=start_row + 1, column=2, padx=(18, 8), pady=8, sticky="w"
-        )
-        auth = ctk.CTkOptionMenu(
-            card, values=[self.t("auth_none"), self.t("auth_bearer")], command=self._auth_changed,
-        )
-        auth.set(self.t("auth_bearer") if self.http_auth_var.get() == "bearer" else self.t("auth_none"))
-        auth.grid(row=start_row + 1, column=3, padx=(8, 20), pady=8, sticky="ew")
-        if self.http_auth_var.get() == "bearer":
-            ctk.CTkLabel(card, text=self.t("http_token"), text_color=COLORS["text"]).grid(
-                row=start_row + 2, column=0, padx=(20, 8), pady=8, sticky="w"
-            )
-            self.token_entry = ctk.CTkEntry(
-                card, textvariable=self.http_token_var, show="" if self.http_token_visible else "•"
-            )
-            self.token_entry.grid(row=start_row + 2, column=1, columnspan=2, padx=8, pady=8, sticky="ew")
-            token_actions = ctk.CTkFrame(card, fg_color="transparent")
-            token_actions.grid(row=start_row + 2, column=3, padx=(8, 20), pady=8, sticky="e")
-            ctk.CTkButton(
-                token_actions, text=self.t("hide") if self.http_token_visible else self.t("show"),
-                width=66, fg_color="transparent", border_width=1, border_color=COLORS["border"],
-                text_color=COLORS["text"], command=self._toggle_http_token,
-            ).pack(side="left", padx=(0, 5))
-            ctk.CTkButton(
-                token_actions, text=self.t("generate"), width=90, command=self._generate_http_token
-            ).pack(side="left")
-        endpoint = self._preview_endpoint()
-        ctk.CTkLabel(card, text=f"{self.t('endpoint')}: {endpoint}", text_color=COLORS["primary"], anchor="w").grid(
-            row=start_row + 3, column=0, columnspan=4, padx=20, pady=(8, 16), sticky="ew"
-        )
-
-    def _build_advanced(self, card) -> None:
-        fields = [
-            (self.t("max_file"), self.max_file_var),
-            (self.t("max_patch"), self.max_patch_var),
-            (self.t("max_search"), self.max_search_var),
-            (self.t("max_output"), self.max_output_var),
-            (self.t("test_timeout"), self.test_timeout_var),
-        ]
-        for index, (label, variable) in enumerate(fields):
-            row = index // 2
-            col = (index % 2) * 2
-            ctk.CTkLabel(card, text=label, text_color=COLORS["text"], anchor="w").grid(
-                row=row, column=col, padx=(20 if col == 0 else 18, 8), pady=9, sticky="w"
-            )
-            ctk.CTkEntry(card, textvariable=variable).grid(
-                row=row, column=col + 1, padx=(8, 20), pady=9, sticky="ew"
-            )
-            card.grid_columnconfigure(col + 1, weight=1)
-        ctk.CTkSwitch(card, text=self.t("dirty_worktree"), variable=self.dirty_var).grid(
-            row=3, column=0, columnspan=2, padx=20, pady=10, sticky="w"
-        )
-        self._entry_row(card, 4, self.t("audit_log"), self.audit_var, browse=self._browse_audit)
-        if self.transport_var.get() == "streamable-http":
-            self._entry_row(card, 5, self.t("allowed_hosts"), self.allowed_hosts_var)
-            self._entry_row(card, 6, self.t("allowed_origins"), self.allowed_origins_var)
-            self._entry_row(card, 7, self.t("max_request"), self.max_request_var)
-            ctk.CTkSwitch(card, text=self.t("json_response"), variable=self.json_response_var).grid(
-                row=8, column=0, columnspan=2, padx=20, pady=10, sticky="w"
-            )
-            ctk.CTkSwitch(card, text=self.t("stateless"), variable=self.stateless_var).grid(
-                row=8, column=2, columnspan=2, padx=20, pady=10, sticky="w"
-            )
+            self._primary_button(
+                action_bar,
+                self.t("stop_http") if self.processes.mcp.running else self.t("start_http"),
+                self._stop_http if self.processes.mcp.running else self._start_http,
+                danger=self.processes.mcp.running,
+            ).pack(side="right", padx=3, pady=9)
 
     def _build_server(self) -> None:
-        page = self._scroll_page()
-        status_card = self._card(page, self.t("mcp_process"))
-        status_card.grid(row=0, column=0, sticky="ew", pady=(0, 14))
-        self.server_status_labels = {}
-        rows = [
-            (self.t("status"), self.t("running") if self.processes.mcp.running else self.t("stopped")),
-            (self.t("transport_info"), self.t("stdio") if self.transport_var.get() == "stdio" else self.t("http")),
-            (self.t("pid"), str(self.processes.mcp.pid or "-")),
-            (self.t("uptime"), format_uptime(self.processes.mcp.uptime)),
-        ]
-        for index, (label, value) in enumerate(rows, start=1):
-            ctk.CTkLabel(status_card, text=label, text_color=COLORS["muted"], anchor="w").grid(
-                row=index, column=0, padx=20, pady=8, sticky="w"
-            )
-            widget = ctk.CTkLabel(status_card, text=value, text_color=COLORS["text"], anchor="e")
-            widget.grid(row=index, column=1, padx=20, pady=8, sticky="e")
-            self.server_status_labels[label] = widget
-        note = self.t("stdio_note") if self.transport_var.get() == "stdio" else self.t("http_note")
-        ctk.CTkLabel(status_card, text=note, text_color=COLORS["muted"], wraplength=760, justify="left").grid(
-            row=5, column=0, columnspan=2, padx=20, pady=(12, 18), sticky="w"
+        page = self._page()
+        running = self.processes.mcp.running
+        _, overview = self._card(
+            page,
+            self.t("service_overview"),
+            self.t("service_running_hint") if running else self.t("service_stopped_hint"),
+            row=0,
+            columnspan=2,
         )
-        buttons = ctk.CTkFrame(status_card, fg_color="transparent")
-        buttons.grid(row=6, column=0, columnspan=2, padx=20, pady=(0, 18), sticky="e")
+        status_line = ctk.CTkFrame(overview, fg_color="transparent")
+        status_line.grid(row=0, column=0, sticky="ew")
+        status_line.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            status_line,
+            text="●",
+            text_color=COLORS["success"] if running else COLORS["subtle"],
+            font=ctk.CTkFont(size=16),
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            status_line,
+            text=self.t("service_running") if running else self.t("service_stopped"),
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=22, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=(22, 0))
+        actions = ctk.CTkFrame(status_line, fg_color="transparent")
+        actions.grid(row=0, column=1, sticky="e")
+        self._secondary_button(actions, self.t("run_test"), self._run_smoke_test).pack(
+            side="left", padx=4
+        )
         if self.transport_var.get() == "streamable-http":
-            ctk.CTkButton(
-                buttons, text=self.t("stop_http") if self.processes.mcp.running else self.t("start_http"),
-                fg_color=COLORS["danger"] if self.processes.mcp.running else COLORS["primary"],
-                command=self._stop_http if self.processes.mcp.running else self._start_http,
-            ).pack(side="left", padx=5)
-        ctk.CTkButton(
-            buttons, text=self.t("run_test"), fg_color="transparent", border_width=1,
-            border_color=COLORS["border"], text_color=COLORS["text"], command=self._run_smoke_test,
-        ).pack(side="left", padx=5)
+            self._primary_button(
+                actions,
+                self.t("stop_http") if running else self.t("start_http"),
+                self._stop_http if running else self._start_http,
+                danger=running,
+            ).pack(side="left", padx=4)
 
-        test_card = self._card(page, self.t("connection_test"))
-        test_card.grid(row=1, column=0, sticky="ew", pady=14)
-        desc = self.t("test_stdio") if self.transport_var.get() == "stdio" else self.t("test_http")
-        ctk.CTkLabel(test_card, text=desc, text_color=COLORS["muted"], anchor="w", wraplength=760).grid(
-            row=1, column=0, padx=20, pady=(0, 10), sticky="ew"
+        metrics = ctk.CTkFrame(overview, fg_color="transparent")
+        metrics.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        self._metric(metrics, self.t("status"), self.t("running") if running else self.t("stopped"), row=0, column=0)
+        self._metric(metrics, self.t("pid"), str(self.processes.mcp.pid or "—"), row=0, column=1)
+        self._metric(metrics, self.t("uptime"), format_uptime(self.processes.mcp.uptime), row=0, column=2)
+        self._metric(metrics, self.t("mode"), self.mode_var.get(), row=0, column=3)
+
+        _, check_body = self._collapsible(
+            page,
+            "server_check",
+            self.t("connection_details"),
+            self.t("connection_details_hint"),
+            row=1,
         )
-        result_text = self.t("never") if not self.last_test else json.dumps(self.last_test, ensure_ascii=False, indent=2)
-        self.test_textbox = ctk.CTkTextbox(test_card, height=145)
-        self.test_textbox.grid(row=2, column=0, padx=20, pady=(0, 18), sticky="ew")
-        self.test_textbox.insert("1.0", result_text)
-        self.test_textbox.configure(state="disabled")
+        if check_body is not None:
+            box = self._code_box(
+                check_body,
+                json.dumps(self.last_test, ensure_ascii=False, indent=2)
+                if self.last_test
+                else self.t("never"),
+                height=180,
+            )
+            box.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-        config_card = self._card(page, self.t("client_config"))
-        config_card.grid(row=2, column=0, sticky="ew", pady=14)
-        snippet = self._client_config_text()
-        self.client_config_box = ctk.CTkTextbox(config_card, height=190)
-        self.client_config_box.grid(row=1, column=0, padx=20, pady=(0, 10), sticky="ew")
-        self.client_config_box.insert("1.0", snippet)
-        self.client_config_box.configure(state="disabled")
-        ctk.CTkButton(
-            config_card, text=self.t("copy_client_config"), command=lambda: self._copy(snippet)
-        ).grid(row=2, column=0, padx=20, pady=(0, 18), sticky="e")
+        _, client_body = self._collapsible(
+            page,
+            "server_client",
+            self.t("client_config"),
+            self.t("client_config_hint"),
+            row=2,
+        )
+        if client_body is not None:
+            config_text = self._client_config_text()
+            box = self._code_box(client_body, config_text, height=260)
+            box.grid(row=0, column=0, columnspan=2, sticky="ew")
+            self._secondary_button(
+                client_body,
+                self.t("copy"),
+                lambda: self._copy_text(config_text),
+            ).grid(row=1, column=1, sticky="e", pady=(10, 0))
 
     def _build_chatgpt(self) -> None:
-        page = self._scroll_page()
-        intro = self._card(page, self.t("chatgpt"))
-        intro.grid(row=0, column=0, sticky="ew", pady=(0, 14))
-        ctk.CTkLabel(
-            intro, text=self.t("chatgpt_intro"), text_color=COLORS["muted"],
-            wraplength=800, justify="left", anchor="w",
-        ).grid(row=1, column=0, padx=20, pady=(0, 18), sticky="ew")
+        page = self._page()
+        _, setup = self._card(
+            page,
+            self.t("tunnel_setup"),
+            self.t("tunnel_setup_hint"),
+            row=0,
+            columnspan=2,
+        )
+        self._field(setup, self.t("tunnel_client"), self.tunnel_path_var, row=0, column=0)
+        self._field(setup, self.t("profile"), self.tunnel_profile_var, row=0, column=1)
+        self._field(setup, self.t("tunnel_id"), self.tunnel_id_var, row=1, column=0)
+        self._field(
+            setup,
+            self.t("api_key"),
+            self.api_key_var,
+            row=1,
+            column=1,
+            show="" if self.api_key_visible else "•",
+        )
+        setup.grid_columnconfigure(
+            0,
+            weight=FORM_PRIMARY_WEIGHT,
+            minsize=360,
+            uniform="tunnel-fields",
+        )
+        setup.grid_columnconfigure(
+            1,
+            weight=FORM_SECONDARY_WEIGHT,
+            minsize=260,
+            uniform="tunnel-fields",
+        )
 
-        form = self._card(page, self.t("chatgpt"))
-        form.grid(row=1, column=0, sticky="ew", pady=14)
-        self._entry_row(form, 1, self.t("tunnel_client"), self.tunnel_path_var, browse=self._browse_tunnel)
-        self._entry_row(form, 2, self.t("tunnel_id"), self.tunnel_id_var)
-        self._entry_row(form, 3, self.t("profile"), self.tunnel_profile_var)
-        ctk.CTkLabel(form, text=self.t("api_key"), text_color=COLORS["text"], anchor="w").grid(
-            row=4, column=0, padx=(20, 12), pady=8, sticky="w"
+        controls = ctk.CTkFrame(setup, fg_color="transparent")
+        controls.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        tunnel_actions = (
+            self._secondary_button(
+                controls,
+                self.t("hide") if self.api_key_visible else self.t("show"),
+                self._toggle_api_key,
+            ),
+            self._secondary_button(controls, self.t("detect"), self._detect_tunnel),
+            self._secondary_button(controls, self.t("initialize"), self._init_tunnel),
+            self._secondary_button(controls, self.t("doctor"), self._doctor_tunnel),
+            self._primary_button(
+                controls,
+                self.t("stop_tunnel") if self.processes.tunnel.running else self.t("start_tunnel"),
+                self._stop_tunnel if self.processes.tunnel.running else self._start_tunnel,
+                danger=self.processes.tunnel.running,
+            ),
         )
-        self.api_key_entry = ctk.CTkEntry(
-            form, textvariable=self.api_key_var, show="" if self.api_key_visible else "•"
+        for index, button in enumerate(tunnel_actions):
+            controls.grid_columnconfigure(index, weight=1, uniform="tunnel-actions")
+            button.grid(
+                row=0,
+                column=index,
+                padx=(0 if index == 0 else 4, 0 if index == len(tunnel_actions) - 1 else 4),
+                sticky="ew",
+            )
+
+        _, status_body = self._card(
+            page,
+            self.t("tunnel_status"),
+            self.t("tunnel_ready"),
+            row=1,
+            columnspan=2,
         )
-        self.api_key_entry.grid(row=4, column=1, padx=8, pady=8, sticky="ew")
-        ctk.CTkButton(
-            form, text=self.t("hide") if self.api_key_visible else self.t("show"), width=90,
-            fg_color="transparent", border_width=1, border_color=COLORS["border"],
-            text_color=COLORS["text"], command=self._toggle_api_key,
-        ).grid(row=4, column=2, padx=(8, 20), pady=8)
-        form.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(form, text=self.t("api_key_not_saved"), text_color=COLORS["warning"], anchor="w").grid(
-            row=5, column=0, columnspan=3, padx=20, pady=(2, 10), sticky="ew"
+        metrics = ctk.CTkFrame(status_body, fg_color="transparent")
+        metrics.grid(row=0, column=0, sticky="ew")
+        self._metric(
+            metrics,
+            self.t("status"),
+            self.t("running") if self.processes.tunnel.running else self.t("stopped"),
+            row=0,
+            column=0,
         )
-        if self.transport_var.get() == "streamable-http" and self.http_auth_var.get() == "bearer":
+        self._metric(metrics, self.t("pid"), str(self.processes.tunnel.pid or "—"), row=0, column=1)
+        self._metric(metrics, self.t("uptime"), format_uptime(self.processes.tunnel.uptime), row=0, column=2)
+        self._metric(metrics, self.t("transport"), self.transport_var.get(), row=0, column=3)
+
+        _, auth_body = self._collapsible(
+            page,
+            "chatgpt_auth",
+            self.t("auth_boundary"),
+            self.t("auth_boundary_hint"),
+            row=2,
+        )
+        if auth_body is not None:
+            info = ctk.CTkFrame(auth_body, fg_color=COLORS["primary_soft"], corner_radius=10)
+            info.grid(row=0, column=0, columnspan=2, sticky="ew")
             ctk.CTkLabel(
-                form, text=self.t("http_tunnel_auth_warning"), text_color=COLORS["warning"],
-                wraplength=760, justify="left",
-            ).grid(row=6, column=0, columnspan=3, padx=20, pady=(0, 12), sticky="ew")
-        actions = ctk.CTkFrame(form, fg_color="transparent")
-        actions.grid(row=7, column=0, columnspan=3, padx=20, pady=(8, 18), sticky="e")
-        for label, command in (
-            (self.t("detect"), self._detect_tunnel),
-            (self.t("initialize"), self._init_tunnel),
-            (self.t("doctor"), self._doctor_tunnel),
-        ):
-            ctk.CTkButton(
-                actions, text=label, fg_color="transparent", border_width=1,
-                border_color=COLORS["border"], text_color=COLORS["text"], command=command,
-            ).pack(side="left", padx=4)
-        ctk.CTkButton(
-            actions,
-            text=self.t("stop_tunnel") if self.processes.tunnel.running else self.t("start_tunnel"),
-            fg_color=COLORS["danger"] if self.processes.tunnel.running else COLORS["primary"],
-            command=self._stop_tunnel if self.processes.tunnel.running else self._start_tunnel,
-        ).pack(side="left", padx=4)
-
-        status = self._card(page, self.t("tunnel_status"))
-        status.grid(row=2, column=0, sticky="ew", pady=14)
-        values = [
-            (self.t("status"), self.t("running") if self.processes.tunnel.running else self.t("stopped")),
-            (self.t("pid"), str(self.processes.tunnel.pid or "-")),
-            (self.t("profile"), self.tunnel_profile_var.get() or "-"),
-            (self.t("transport_info"), self.t("stdio") if self.transport_var.get() == "stdio" else self.t("http")),
-        ]
-        for index, (label, value) in enumerate(values, start=1):
-            ctk.CTkLabel(status, text=label, text_color=COLORS["muted"]).grid(
-                row=index, column=0, padx=20, pady=8, sticky="w"
-            )
-            ctk.CTkLabel(status, text=value, text_color=COLORS["text"]).grid(
-                row=index, column=1, padx=20, pady=8, sticky="e"
-            )
+                info,
+                text=self.t("auth_explanation"),
+                justify="left",
+                wraplength=760,
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(size=FONT_BODY),
+            ).pack(anchor="w", padx=14, pady=13)
+            if self.transport_var.get() == "streamable-http":
+                ctk.CTkLabel(
+                    auth_body,
+                    text=self.t("http_tunnel_note"),
+                    justify="left",
+                    wraplength=760,
+                    text_color=COLORS["warning"],
+                    font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
+                ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
     def _build_logs(self) -> None:
-        page = ctk.CTkFrame(self.page_container, fg_color="transparent")
-        page.grid(row=0, column=0, sticky="nsew")
-        page.grid_columnconfigure(0, weight=1)
-        page.grid_rowconfigure(1, weight=1)
-        tabs = ctk.CTkTabview(page, fg_color=COLORS["surface"])
-        tabs.grid(row=0, column=0, rowspan=2, sticky="nsew")
-        self.log_boxes = {}
-        for key in ("log_mcp", "log_tunnel", "log_audit"):
-            name = self.t(key)
-            tab = tabs.add(name)
-            tab.grid_columnconfigure(0, weight=1)
-            tab.grid_rowconfigure(0, weight=1)
-            box = ctk.CTkTextbox(tab, font=("Consolas" if os.name == "nt" else "monospace", 12))
-            box.grid(row=0, column=0, padx=8, pady=8, sticky="nsew")
-            self.log_boxes[key] = box
-        controls = ctk.CTkFrame(page, fg_color="transparent")
-        controls.grid(row=2, column=0, sticky="e", pady=(10, 0))
-        ctk.CTkButton(
-            controls, text=self.t("refresh"), command=self._refresh_logs_now
-        ).pack(side="left", padx=4)
-        ctk.CTkButton(
-            controls, text=self.t("clear_view"), fg_color="transparent", border_width=1,
-            border_color=COLORS["border"], text_color=COLORS["text"], command=self._clear_log_view,
-        ).pack(side="left", padx=4)
-        ctk.CTkButton(
-            controls, text=self.t("export"), fg_color="transparent", border_width=1,
-            border_color=COLORS["border"], text_color=COLORS["text"], command=self._export_logs,
-        ).pack(side="left", padx=4)
-        self._refresh_logs_now()
+        page = self._page()
+        _, body = self._card(
+            page,
+            self.t("logs"),
+            self.t("logs_subtitle"),
+            row=0,
+            columnspan=2,
+        )
+        labels = [self.t("log_mcp"), self.t("log_tunnel"), self.t("log_audit")]
+        mapping = dict(zip(labels, ("mcp", "tunnel", "audit")))
+        reverse = {value: key for key, value in mapping.items()}
+        tabs = ctk.CTkSegmentedButton(
+            body,
+            values=labels,
+            height=44,
+            selected_color=COLORS["accent_soft"],
+            selected_hover_color=COLORS["surface_hover"],
+            unselected_color=COLORS["surface_alt"],
+            unselected_hover_color=COLORS["surface_hover"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=FONT_BODY),
+            command=lambda value: self._change_log_channel(mapping[value]),
+        )
+        tabs.set(reverse[self.log_channel])
+        tabs.grid(row=0, column=0, sticky="w")
+
+        toolbar = ctk.CTkFrame(body, fg_color="transparent")
+        toolbar.grid(row=0, column=1, sticky="e")
+        self._secondary_button(toolbar, self.t("refresh"), lambda: self._show_page("logs")).pack(
+            side="left", padx=4
+        )
+        log_text = self._current_log_text()
+        self._secondary_button(toolbar, self.t("copy"), lambda: self._copy_text(log_text)).pack(
+            side="left", padx=4
+        )
+        box = self._code_box(body, log_text or self.t("empty_log"), height=500)
+        box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
 
     def _build_about(self) -> None:
-        page = self._scroll_page()
-        card = self._card(page)
-        card.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(
-            card, text="Local Repo MCP", font=ctk.CTkFont(size=28, weight="bold"),
-            text_color=COLORS["text"],
-        ).grid(row=0, column=0, padx=28, pady=(30, 8), sticky="w")
-        ctk.CTkLabel(
-            card, text=self.t("about_title"), font=ctk.CTkFont(size=17), text_color=COLORS["primary"]
-        ).grid(row=1, column=0, padx=28, pady=4, sticky="w")
-        ctk.CTkLabel(
-            card, text=self.t("about_desc"), text_color=COLORS["muted"], wraplength=780, justify="left"
-        ).grid(row=2, column=0, padx=28, pady=(4, 20), sticky="w")
-        ctk.CTkLabel(card, text=f"{self.t('version')}: {VERSION}", text_color=COLORS["text"]).grid(
-            row=3, column=0, padx=28, pady=6, sticky="w"
+        page = self._page()
+        _, intro = self._card(
+            page,
+            "Local Repo MCP",
+            self.t("about_desc"),
+            row=0,
+            columnspan=2,
         )
         ctk.CTkLabel(
-            card, text=self.t("security_boundary"), font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=COLORS["text"],
-        ).grid(row=4, column=0, padx=28, pady=(22, 8), sticky="w")
-        ctk.CTkLabel(
-            card, text="✓ " + self.t("boundary_items").replace("\n", "\n✓ "),
-            text_color=COLORS["muted"], justify="left",
-        ).grid(row=5, column=0, padx=28, pady=(0, 24), sticky="w")
-        actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.grid(row=6, column=0, padx=28, pady=(0, 30), sticky="w")
-        ctk.CTkButton(actions, text=self.t("github"), command=lambda: webbrowser.open(GITHUB_URL)).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
-            actions, text=self.t("documentation"), fg_color="transparent", border_width=1,
-            border_color=COLORS["border"], text_color=COLORS["text"], command=self._open_docs,
-        ).pack(side="left")
+            intro,
+            text=f"{self.t('version')} {VERSION}",
+            height=30,
+            corner_radius=9,
+            fg_color=COLORS["primary_soft"],
+            text_color=COLORS["primary"],
+            font=ctk.CTkFont(size=FONT_SMALL, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
+        self._secondary_button(
+            intro,
+            self.t("github"),
+            lambda: webbrowser.open(GITHUB_URL),
+        ).grid(row=0, column=1, sticky="e")
 
-    def _collect_config(self) -> AppConfig | None:
+        _, capabilities = self._card(
+            page,
+            self.t("capabilities"),
+            "",
+            row=1,
+            columnspan=2,
+        )
+        for index, (icon, text) in enumerate(
+            (
+                ("↳", self.t("cap_read")),
+                ("±", self.t("cap_patch")),
+                ("✓", self.t("cap_test")),
+                ("⌁", self.t("cap_transport")),
+            )
+        ):
+            frame = ctk.CTkFrame(capabilities, fg_color=COLORS["surface_alt"], corner_radius=10)
+            frame.grid(row=index // 2, column=index % 2, padx=5, pady=5, sticky="ew")
+            capabilities.grid_columnconfigure(index % 2, weight=1)
+            ctk.CTkLabel(
+                frame,
+                text=f"{icon}   {text}",
+                anchor="w",
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
+            ).pack(fill="x", padx=14, pady=13)
+
+        _, security = self._collapsible(
+            page,
+            "about_security",
+            self.t("security_boundary"),
+            self.t("security_boundary_hint"),
+            row=2,
+        )
+        if security is not None:
+            for index, item in enumerate(self.t("boundary_items").splitlines()):
+                ctk.CTkLabel(
+                    security,
+                    text=f"•  {item}",
+                    anchor="w",
+                    text_color=COLORS["text"],
+                    font=ctk.CTkFont(size=FONT_BODY),
+                ).grid(row=index, column=0, columnspan=2, sticky="w", pady=4)
+
+    def _code_box(self, parent, text: str, *, height: int):
+        box = ctk.CTkTextbox(
+            parent,
+            height=height,
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+            fg_color=COLORS["code"],
+            text_color=COLORS["text"],
+            font=("Consolas" if os.name == "nt" else "monospace", FONT_BODY),
+            wrap="word",
+        )
+        box.insert("1.0", text)
+        box.configure(state="disabled")
+        return box
+
+    def _collect_config(self, *, quiet: bool = False) -> AppConfig | None:
         try:
             cfg = AppConfig(
                 language=self.config_data.language,
@@ -577,12 +1092,10 @@ class LocalRepoMCPApp(ctk.CTk):
                 http_host=self.http_host_var.get().strip() or "127.0.0.1",
                 http_port=int(self.http_port_var.get()),
                 http_path=self.http_path_var.get().strip() or "/mcp",
-                http_auth_mode=self.http_auth_var.get(),
+                http_auth_mode="bearer",
+                http_auth_token=self.http_token_var.get().strip(),
                 http_allowed_hosts=self.allowed_hosts_var.get().strip(),
                 http_allowed_origins=self.allowed_origins_var.get().strip(),
-                http_json_response=self.json_response_var.get(),
-                http_stateless=self.stateless_var.get(),
-                http_max_request_bytes=int(self.max_request_var.get()) * 1024,
                 max_file_bytes=int(self.max_file_var.get()) * 1000,
                 max_patch_bytes=int(self.max_patch_var.get()) * 1000,
                 max_search_results=int(self.max_search_var.get()),
@@ -594,18 +1107,24 @@ class LocalRepoMCPApp(ctk.CTk):
                 tunnel_id=self.tunnel_id_var.get().strip(),
                 tunnel_profile=self.tunnel_profile_var.get().strip() or "local-repo",
                 control_plane_api_key=self.api_key_var.get().strip(),
-                http_auth_token=self.http_token_var.get().strip(),
             )
         except ValueError:
-            messagebox.showerror(self.t("error"), self.t("max_file_invalid"))
+            if not quiet:
+                messagebox.showerror(self.t("error"), self.t("numeric_invalid"))
             return None
-        if cfg.http_auth_mode == "bearer" and not cfg.http_auth_token:
+
+        if cfg.transport == "streamable-http":
+            cfg.http_auth_mode = "bearer"
             cfg.ensure_http_token()
             self.http_token_var.set(cfg.http_auth_token)
+
         errors = cfg.validate()
         if errors:
-            message = "\n".join(f"• {self.t(key)}" for key in errors)
-            messagebox.showerror(self.t("error"), message)
+            if not quiet:
+                messagebox.showerror(
+                    self.t("error"),
+                    "\n".join("• " + self.t(key) for key in errors),
+                )
             return None
         return cfg
 
@@ -615,102 +1134,109 @@ class LocalRepoMCPApp(ctk.CTk):
             return None
         save_config(cfg)
         self.config_data = cfg
-        self._set_status(self.t("saved"), COLORS["success"])
+        self._status(self.t("saved"), "success")
         return cfg
 
     def _save_action(self) -> None:
-        was_running = self.processes.mcp.running
         cfg = self._save()
-        if cfg is None:
-            return
-        if was_running:
-            self._run_background(lambda: self.processes.restart_http(cfg), self.t("saved"), rebuild=True)
+        if cfg and self.processes.mcp.running and cfg.transport == "streamable-http":
+            self._background(
+                lambda: self.processes.restart_http(cfg),
+                self.t("running"),
+                rebuild=True,
+            )
 
     def _start_http(self) -> None:
         cfg = self._save()
-        if cfg is None:
-            return
-        if cfg.transport != "streamable-http":
-            return
-        self._run_background(lambda: self.processes.start_http(cfg), self.t("running"), rebuild=True)
+        if cfg is not None:
+            self._background(
+                lambda: self.processes.start_http(cfg),
+                self.t("running"),
+                rebuild=True,
+            )
 
     def _stop_http(self) -> None:
-        self._run_background(self.processes.mcp.stop, self.t("stopped"), rebuild=True)
+        self._background(
+            self.processes.mcp.stop,
+            self.t("stopped"),
+            rebuild=True,
+        )
 
     def _run_smoke_test(self) -> None:
         cfg = self._save()
         if cfg is None:
             return
         if cfg.transport == "streamable-http" and not self.processes.mcp.running:
-            messagebox.showerror(self.t("error"), self.t("start_http"))
+            messagebox.showerror(self.t("error"), self.t("start_http_first"))
             return
 
-        def task():
-            return run_smoke_test(cfg)
+        def success(value):
+            self.last_test = value
+            self._status(self.t("passed"), "success")
+            self._show_page("server")
 
-        def success(result):
-            self.last_test = result
-            self._set_status(self.t("test_success"), COLORS["success"])
-            if self.current_page == "server":
-                self._show_page("server")
-
-        self._run_background(task, on_success=success)
+        self._background(lambda: run_smoke_test(cfg), on_success=success)
 
     def _detect_tunnel(self) -> None:
         cfg = self._collect_config()
         if cfg:
-            title = self.t("detect")
-            self._run_background(
-                lambda: self.tunnel.detect(cfg),
-                on_success=lambda value, dialog_title=title: self._show_result(value, dialog_title),
-            )
+            self._background(lambda: self.tunnel.detect(cfg), on_success=self._show_result)
 
     def _init_tunnel(self) -> None:
         cfg = self._save()
         if cfg:
-            title = self.t("initialize")
-            self._run_background(
-                lambda: self.tunnel.init_profile(cfg),
-                on_success=lambda value, dialog_title=title: self._show_result(value, dialog_title),
-            )
+            self._background(lambda: self.tunnel.init_profile(cfg), on_success=self._show_result)
 
     def _doctor_tunnel(self) -> None:
         cfg = self._collect_config()
         if cfg:
-            title = self.t("doctor")
-            self._run_background(
-                lambda: self.tunnel.doctor(cfg),
-                on_success=lambda value, dialog_title=title: self._show_result(value, dialog_title),
-            )
+            self._background(lambda: self.tunnel.doctor(cfg), on_success=self._show_result)
 
     def _start_tunnel(self) -> None:
         cfg = self._save()
         if cfg:
-            self._run_background(lambda: self.tunnel.start(cfg), self.t("running"), rebuild=True)
+            self._background(
+                lambda: self.tunnel.start(cfg),
+                self.t("running"),
+                rebuild=True,
+            )
 
     def _stop_tunnel(self) -> None:
-        self._run_background(self.processes.tunnel.stop, self.t("stopped"), rebuild=True)
+        self._background(
+            self.processes.tunnel.stop,
+            self.t("stopped"),
+            rebuild=True,
+        )
 
-    def _run_background(self, task: Callable, success_message: str | None = None, *, on_success: Callable | None = None, rebuild: bool = False) -> None:
+    def _background(
+        self,
+        task: Callable,
+        message: str | None = None,
+        *,
+        on_success: Callable | None = None,
+        rebuild: bool = False,
+    ) -> None:
         if self.busy:
-            self._set_status(self.t("busy"), COLORS["warning"])
             return
         self.busy = True
-        self._set_status(self.t("starting"), COLORS["primary"])
+        self._status(self.t("starting"), "working")
 
         def worker():
             try:
                 result = task()
-            except Exception as exc:  # GUI boundary: show actionable error
-                self.after(0, lambda err=exc: self._operation_failed(str(err)))
+            except Exception as exc:
+                self.after(0, lambda error=str(exc): self._failed(error))
                 return
-            self.after(0, lambda res=result: self._operation_succeeded(res, success_message, on_success, rebuild))
+            self.after(
+                0,
+                lambda: self._succeeded(result, message, on_success, rebuild),
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _operation_failed(self, error: str) -> None:
+    def _failed(self, error: str) -> None:
         self.busy = False
-        self._set_status(error, COLORS["danger"])
+        self._status(self.t("error"), "danger")
         show_result_dialog(
             self,
             title=self.t("error"),
@@ -718,284 +1244,175 @@ class LocalRepoMCPApp(ctk.CTk):
             kind="error",
             copy_label=self.t("copy"),
             ok_label=self.t("ok"),
-            subtitle=self.t("dialog_error"),
         )
 
-    def _operation_succeeded(self, result, message: str | None, callback: Callable | None, rebuild: bool) -> None:
+    def _succeeded(self, result, message, callback, rebuild) -> None:
         self.busy = False
         if callback:
             callback(result)
         elif message:
-            self._set_status(message, COLORS["success"])
-        else:
-            self._set_status(self.t("ready"), COLORS["success"])
+            self._status(message, "success")
         if rebuild:
             self._show_page(self.current_page)
 
-    def _show_result(self, value: str, title: str | None = None) -> None:
-        self._set_status(self.t("result_ok"), COLORS["success"])
+    def _show_result(self, value: str) -> None:
         show_result_dialog(
             self,
-            title=title or self.t("result_ok"),
+            title=self.t("success"),
             message=value,
             kind="success",
             copy_label=self.t("copy"),
             ok_label=self.t("ok"),
-            subtitle=self.t("dialog_success"),
         )
 
-    def _set_status(self, text: str, color=None) -> None:
-        self.status_message = text
-        if hasattr(self, "banner"):
-            self.banner.configure(text=text, text_color=color or COLORS["muted"])
-
-    def _mode_changed(self, value: str) -> None:
-        mapping = {self.t("mode_read"): "read", self.t("mode_write"): "write", self.t("mode_test"): "test"}
-        self.mode_var.set(mapping[value])
-        self._update_mode_help()
-
-    def _update_mode_help(self) -> None:
-        if not hasattr(self, "mode_help"):
-            return
-        mapping = {
-            "read": self.t("mode_read_desc"),
-            "write": self.t("mode_write_desc") + "\n⚠ " + self.t("write_warning"),
-            "test": self.t("mode_test_desc") + "\n⚠ " + self.t("test_warning"),
+    def _status(self, text: str, kind: str = "neutral") -> None:
+        palette = {
+            "neutral": (COLORS["surface_alt"], COLORS["muted"]),
+            "working": (COLORS["primary_soft"], COLORS["primary"]),
+            "success": (COLORS["success_soft"], COLORS["success"]),
+            "danger": (COLORS["danger_soft"], COLORS["danger"]),
         }
-        self.mode_help.configure(text=mapping[self.mode_var.get()])
+        background, foreground = palette[kind]
+        self.banner.configure(text=text, fg_color=background, text_color=foreground)
 
     def _transport_changed(self, value: str) -> None:
         selected = "stdio" if value == self.t("stdio") else "streamable-http"
         if self.processes.mcp.running and selected != self.transport_var.get():
-            messagebox.showwarning(self.t("warning"), self.t("stop_http"))
-            self.transport_segment.set(self.t("http"))
+            messagebox.showwarning(self.t("warning"), self.t("stop_http_first"))
             return
         self.transport_var.set(selected)
+        if selected == "streamable-http" and not self.http_token_var.get():
+            self._generate_token(rebuild=False)
         self._show_page("home")
 
-    def _auth_changed(self, value: str) -> None:
-        self.http_auth_var.set("bearer" if value == self.t("auth_bearer") else "none")
-        if self.http_auth_var.get() == "bearer" and not self.http_token_var.get():
-            self._generate_http_token(rebuild=False)
-        self._show_page("home")
+    def _generate_token(self, rebuild: bool = True) -> None:
+        import secrets
 
-    def _toggle_http_token(self) -> None:
-        self.http_token_visible = not self.http_token_visible
+        self.http_token_var.set(secrets.token_urlsafe(32))
+        if rebuild:
+            self._show_page("home")
+
+    def _toggle_token(self) -> None:
+        self.token_visible = not self.token_visible
         self._show_page("home")
 
     def _toggle_api_key(self) -> None:
         self.api_key_visible = not self.api_key_visible
         self._show_page("chatgpt")
 
-    def _generate_http_token(self, rebuild: bool = True) -> None:
-        import secrets
-        self.http_token_var.set(secrets.token_urlsafe(32))
-        if rebuild:
-            self._show_page("home")
-
-    def _toggle_advanced(self) -> None:
-        self.advanced_open = not self.advanced_open
-        self._show_page("home")
-
-    def _change_language(self, value: str) -> None:
-        language = "zh" if value == "中文" else "en"
-        cfg = self._collect_config_quiet() or self.config_data
-        cfg.language = language
-        cfg.control_plane_api_key = self.api_key_var.get().strip()
-        cfg.http_auth_token = self.http_token_var.get().strip()
-        save_config(cfg)
-        self.config_data = cfg
-        self._build_shell()
-        self._show_page(self.current_page)
-
-    def _change_appearance(self, value: str) -> None:
-        reverse = {self.t("system"): "system", self.t("light"): "light", self.t("dark"): "dark"}
-        selected = reverse[value]
-        cfg = self._collect_config_quiet() or self.config_data
-        cfg.appearance = selected
-        cfg.control_plane_api_key = self.api_key_var.get().strip()
-        cfg.http_auth_token = self.http_token_var.get().strip()
-        save_config(cfg)
-        self.config_data = cfg
-        ctk.set_appearance_mode(selected)
-
     def _browse_repo(self) -> None:
-        path = filedialog.askdirectory(initialdir=self.repo_var.get() or str(Path.home()))
+        path = filedialog.askdirectory(initialdir=self.repo_var.get() or str(ROOT))
         if path:
             self.repo_var.set(path)
-            if hasattr(self, "branch_label"):
-                self.branch_label.configure(text=f"{self.t('current_branch')}: {self._git_branch()}")
+            self._show_page("home")
 
-    def _browse_audit(self) -> None:
-        path = filedialog.asksaveasfilename(
-            initialfile="audit.jsonl", defaultextension=".jsonl",
-            filetypes=[("JSON Lines", "*.jsonl"), ("All files", "*")],
-        )
-        if path:
-            self.audit_var.set(path)
-
-    def _browse_tunnel(self) -> None:
-        path = filedialog.askopenfilename()
-        if path:
-            self.tunnel_path_var.set(path)
-
-    def _open_repo(self) -> None:
-        path = Path(self.repo_var.get()).expanduser()
-        if not path.exists():
-            return
-        if os.name == "nt":
-            os.startfile(str(path))  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
-        else:
-            subprocess.Popen(["xdg-open", str(path)])
+    def _repo_name(self) -> str:
+        raw = self.repo_var.get().strip()
+        return Path(raw).name if raw else self.t("not_selected")
 
     def _git_branch(self) -> str:
         repo = self.repo_var.get().strip()
         if not repo:
-            return "-"
+            return "—"
         try:
             result = subprocess.run(
                 ["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"],
-                text=True, capture_output=True, timeout=5, check=False, shell=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                timeout=5,
+                check=False,
+                shell=False,
             )
-            if result.returncode != 0:
-                return self.t("git_unavailable")
-            value = result.stdout.strip()
-            return self.t("detached_head") if value == "HEAD" else value
-        except (OSError, subprocess.SubprocessError):
-            return self.t("git_unavailable")
-
-    def _preview_endpoint(self) -> str:
-        try:
-            port = int(self.http_port_var.get())
-        except ValueError:
-            port = 8000
-        host = self.http_host_var.get().strip() or "127.0.0.1"
-        if host == "0.0.0.0":
-            host = "127.0.0.1"
-        elif host == "::":
-            host = "::1"
-        display_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
-        path = self.http_path_var.get().strip() or "/mcp"
-        if not path.startswith("/"):
-            path = "/" + path
-        return f"http://{display_host}:{port}{path}"
+            return result.stdout.strip() if result.returncode == 0 else "—"
+        except OSError:
+            return "—"
 
     def _client_config_text(self) -> str:
-        cfg = self._collect_config_quiet()
+        cfg = self._collect_config(quiet=True)
         if cfg is None:
             return ""
         if cfg.transport == "streamable-http":
-            payload: dict = {"url": cfg.endpoint_url(), "transport": "streamable-http"}
-            if cfg.http_auth_mode == "bearer":
-                payload["headers"] = {"Authorization": "Bearer <LOCAL_REPO_MCP_TOKEN>"}
-            return json.dumps({"mcpServers": {"local-repo": payload}}, indent=2)
+            return json.dumps(
+                {
+                    "mcpServers": {
+                        "local-repo": {
+                            "url": cfg.endpoint_url(),
+                            "transport": "streamable-http",
+                            "headers": {
+                                "Authorization": "Bearer <LOCAL_REPO_MCP_TOKEN>"
+                            },
+                        }
+                    }
+                },
+                indent=2,
+            )
+
         env = cfg.mcp_env()
         env["MCP_TRANSPORT"] = "stdio"
         env.pop("HTTP_AUTH_TOKEN", None)
-        return json.dumps({
-            "mcpServers": {
-                "local-repo": {
-                    "command": sys.executable,
-                    "args": [str(ROOT / "server.py")],
-                    "env": env,
+        return json.dumps(
+            {
+                "mcpServers": {
+                    "local-repo": {
+                        "command": sys.executable,
+                        "args": [str(ROOT / "server.py")],
+                        "env": env,
+                    }
                 }
-            }
-        }, indent=2)
+            },
+            indent=2,
+        )
 
-    def _collect_config_quiet(self) -> AppConfig | None:
+    def _change_log_channel(self, channel: str) -> None:
+        self.log_channel = channel
+        self._show_page("logs")
+
+    def _current_log_text(self) -> str:
+        if self.log_channel == "mcp":
+            return "\n".join(self.processes.mcp.snapshot())
+        if self.log_channel == "tunnel":
+            return "\n".join(self.processes.tunnel.snapshot())
+        return self._tail_audit()
+
+    def _tail_audit(self) -> str:
+        raw = self.audit_var.get().strip()
+        if not raw:
+            return ""
         try:
-            return AppConfig(
-                language=self.config_data.language,
-                appearance=self.config_data.appearance,
-                repo_root=self.repo_var.get().strip(), mcp_mode=self.mode_var.get(),
-                transport=self.transport_var.get(), http_host=self.http_host_var.get().strip() or "127.0.0.1",
-                http_port=int(self.http_port_var.get()), http_path=self.http_path_var.get().strip() or "/mcp",
-                http_auth_mode=self.http_auth_var.get(), http_auth_token=self.http_token_var.get().strip(),
-                http_allowed_hosts=self.allowed_hosts_var.get().strip(), http_allowed_origins=self.allowed_origins_var.get().strip(),
-                http_json_response=self.json_response_var.get(), http_stateless=self.stateless_var.get(),
-                http_max_request_bytes=int(self.max_request_var.get()) * 1024,
-                max_file_bytes=int(self.max_file_var.get()) * 1000, max_patch_bytes=int(self.max_patch_var.get()) * 1000,
-                max_search_results=int(self.max_search_var.get()), max_output_bytes=int(self.max_output_var.get()) * 1000,
-                allow_dirty_worktree=self.dirty_var.get(), audit_log=self.audit_var.get().strip(),
-                test_timeout_max=int(self.test_timeout_var.get()), tunnel_client_path=self.tunnel_path_var.get().strip(),
-                tunnel_id=self.tunnel_id_var.get().strip(), tunnel_profile=self.tunnel_profile_var.get().strip(),
-                control_plane_api_key=self.api_key_var.get().strip(),
-            )
-        except ValueError:
-            return None
+            lines = Path(raw).read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).splitlines()
+            return "\n".join(lines[-500:])
+        except OSError:
+            return ""
 
-    def _copy(self, text: str) -> None:
+    def _copy_text(self, text: str) -> None:
         self.clipboard_clear()
         self.clipboard_append(text)
-        self._set_status(self.t("copied"), COLORS["success"])
+        self.update()
+        self._status(self.t("copied"), "success")
 
-    def _open_docs(self) -> None:
-        filename = "README.zh-CN.md" if self.config_data.language == "zh" else "README.md"
-        path = ROOT / filename
-        if path.exists():
-            webbrowser.open(path.as_uri())
-        else:
-            webbrowser.open(GITHUB_URL)
+    def _change_language(self, value: str) -> None:
+        self.config_data.language = "zh" if value == "中文" else "en"
+        save_config(self.config_data)
+        self._build_shell()
+        self._show_page(self.current_page)
 
-    def _refresh_logs_now(self) -> None:
-        if not hasattr(self, "log_boxes"):
-            return
-        contents = {
-            "log_mcp": "\n".join(self.processes.mcp.snapshot()),
-            "log_tunnel": "\n".join(self.processes.tunnel.snapshot()),
-            "log_audit": self._tail_audit(),
+    def _change_appearance(self, value: str) -> None:
+        reverse = {
+            self.t("system"): "system",
+            self.t("light"): "light",
+            self.t("dark"): "dark",
         }
-        for key, box in self.log_boxes.items():
-            box.configure(state="normal")
-            box.delete("1.0", "end")
-            box.insert("1.0", contents.get(key, ""))
-            box.see("end")
-            box.configure(state="disabled")
-
-    def _tail_audit(self, limit: int = 500) -> str:
-        path_text = self.audit_var.get().strip()
-        if not path_text:
-            return ""
-        path = Path(path_text).expanduser()
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            return "\n".join(lines[-limit:])
-        except (FileNotFoundError, OSError):
-            return ""
-
-    def _clear_log_view(self) -> None:
-        for box in getattr(self, "log_boxes", {}).values():
-            box.configure(state="normal")
-            box.delete("1.0", "end")
-            box.configure(state="disabled")
-
-    def _export_logs(self) -> None:
-        path = filedialog.asksaveasfilename(initialfile="local-repo-mcp-logs.txt", defaultextension=".txt")
-        if not path:
-            return
-        text = "\n\n===== MCP =====\n" + "\n".join(self.processes.mcp.snapshot())
-        text += "\n\n===== TUNNEL =====\n" + "\n".join(self.processes.tunnel.snapshot())
-        text += "\n\n===== AUDIT =====\n" + self._tail_audit()
-        Path(path).write_text(text, encoding="utf-8")
-
-    def _periodic_refresh(self) -> None:
-        if self.current_page == "logs":
-            self._refresh_logs_now()
-        if self.current_page == "server" and hasattr(self, "server_status_labels"):
-            status_key = self.t("status")
-            pid_key = self.t("pid")
-            uptime_key = self.t("uptime")
-            if status_key in self.server_status_labels:
-                self.server_status_labels[status_key].configure(
-                    text=self.t("running") if self.processes.mcp.running else self.t("stopped")
-                )
-            if pid_key in self.server_status_labels:
-                self.server_status_labels[pid_key].configure(text=str(self.processes.mcp.pid or "-"))
-            if uptime_key in self.server_status_labels:
-                self.server_status_labels[uptime_key].configure(text=format_uptime(self.processes.mcp.uptime))
-        self.after(1000, self._periodic_refresh)
+        selected = reverse[value]
+        self.config_data.appearance = selected
+        ctk.set_appearance_mode(selected)
+        save_config(self.config_data)
+        self._build_shell()
+        self._show_page(self.current_page)
 
     def _on_close(self) -> None:
         if self.processes.mcp.running or self.processes.tunnel.running:
@@ -1006,8 +1423,7 @@ class LocalRepoMCPApp(ctk.CTk):
 
 
 def main() -> None:
-    app = LocalRepoMCPApp()
-    app.mainloop()
+    LocalRepoMCPApp().mainloop()
 
 
 if __name__ == "__main__":

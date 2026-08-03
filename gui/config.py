@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -10,13 +11,40 @@ from typing import Literal
 APP_NAME = "local-repo-mcp"
 
 
+def _expanded_env_path(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    expanded = os.path.expandvars(raw)
+    if os.name == "nt" and "%" in expanded:
+        return None
+    try:
+        return Path(expanded).expanduser()
+    except RuntimeError:
+        return None
+
+
+def _home_dir() -> Path:
+    for name in ("USERPROFILE", "HOME"):
+        candidate = _expanded_env_path(name)
+        if candidate is not None:
+            return candidate
+    try:
+        return Path.home()
+    except RuntimeError:
+        return Path(tempfile.gettempdir())
+
+
 def _config_dir() -> Path:
     if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home()))
-        return base / "LocalRepoMCP"
-    if os.environ.get("XDG_CONFIG_HOME"):
-        return Path(os.environ["XDG_CONFIG_HOME"]) / APP_NAME
-    return Path.home() / ".config" / APP_NAME
+        appdata = _expanded_env_path("APPDATA")
+        if appdata is None:
+            appdata = _home_dir() / "AppData" / "Roaming"
+        return appdata / "LocalRepoMCP"
+    xdg = _expanded_env_path("XDG_CONFIG_HOME")
+    if xdg is not None:
+        return xdg / APP_NAME
+    return _home_dir() / ".config" / APP_NAME
 
 
 CONFIG_DIR = _config_dir()
@@ -24,11 +52,14 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 SECRETS_PATH = CONFIG_DIR / "secrets.json"
 
 
+def _default_audit_log() -> str:
+    return str(CONFIG_DIR / "audit.jsonl")
+
+
 @dataclass
 class AppConfig:
     language: Literal["zh", "en"] = "zh"
     appearance: Literal["system", "light", "dark"] = "system"
-
     repo_root: str = ""
     mcp_mode: Literal["read", "write", "test"] = "read"
     transport: Literal["stdio", "streamable-http"] = "stdio"
@@ -36,7 +67,7 @@ class AppConfig:
     http_host: str = "127.0.0.1"
     http_port: int = 8000
     http_path: str = "/mcp"
-    http_auth_mode: Literal["none", "bearer"] = "none"
+    http_auth_mode: Literal["none", "bearer"] = "bearer"
     http_allowed_hosts: str = "127.0.0.1:*,localhost:*"
     http_allowed_origins: str = "http://127.0.0.1:*,http://localhost:*"
     http_json_response: bool = True
@@ -48,22 +79,18 @@ class AppConfig:
     max_search_results: int = 50
     max_output_bytes: int = 20_000
     allow_dirty_worktree: bool = False
-    audit_log: str = ""
+    audit_log: str = field(default_factory=_default_audit_log)
     test_timeout_max: int = 300
 
     tunnel_client_path: str = "tunnel-client"
     tunnel_id: str = ""
     tunnel_profile: str = "local-repo"
 
-    # Memory-only. Never persisted by save_config().
     control_plane_api_key: str = field(default="", repr=False, compare=False)
-    # Stored separately in secrets.json with restrictive permissions.
     http_auth_token: str = field(default="", repr=False, compare=False)
 
     def endpoint_url(self) -> str:
         host = self.http_host.strip() or "127.0.0.1"
-        # Wildcard bind addresses are not useful client destinations. Local
-        # clients and tunnel-client should connect through loopback instead.
         if host == "0.0.0.0":
             host = "127.0.0.1"
         elif host == "::":
@@ -88,7 +115,10 @@ class AppConfig:
         if not repo_text:
             errors.append("repo_required")
         else:
-            repo = Path(repo_text).expanduser()
+            try:
+                repo = Path(repo_text).expanduser()
+            except RuntimeError:
+                repo = Path(repo_text)
             if not repo.exists():
                 errors.append("repo_not_found")
             elif not repo.is_dir():
@@ -116,19 +146,18 @@ class AppConfig:
                 errors.append("http_path_invalid")
             if self.http_auth_mode not in {"none", "bearer"}:
                 errors.append("http_auth_invalid")
-            if not self.is_local_http():
-                if self.http_auth_mode != "bearer":
-                    errors.append("http_nonlocal_auth_required")
-                if not self.http_allowed_hosts.strip():
-                    errors.append("http_nonlocal_hosts_required")
-            if self.http_auth_mode == "bearer" and not self.http_auth_token:
+            elif self.http_auth_mode != "bearer":
+                errors.append("http_auth_required")
+            if not self.is_local_http() and not self.http_allowed_hosts.strip():
+                errors.append("http_nonlocal_hosts_required")
+            if not self.http_auth_token:
                 errors.append("http_token_required")
             if not 1024 <= self.http_max_request_bytes <= 5_000_000:
                 errors.append("http_request_size_invalid")
-
         return errors
 
     def mcp_env(self) -> dict[str, str]:
+        auth_mode = "bearer" if self.transport == "streamable-http" else self.http_auth_mode
         return {
             "REPO_ROOT": str(Path(self.repo_root).expanduser().resolve()) if self.repo_root else "",
             "MCP_MODE": self.mcp_mode,
@@ -143,7 +172,7 @@ class AppConfig:
             "HTTP_HOST": self.http_host.strip() or "127.0.0.1",
             "HTTP_PORT": str(self.http_port),
             "HTTP_PATH": self.http_path.strip() or "/mcp",
-            "HTTP_AUTH_MODE": self.http_auth_mode,
+            "HTTP_AUTH_MODE": auth_mode,
             "HTTP_AUTH_TOKEN": self.http_auth_token,
             "HTTP_ALLOWED_HOSTS": self.http_allowed_hosts.strip(),
             "HTTP_ALLOWED_ORIGINS": self.http_allowed_origins.strip(),
@@ -154,6 +183,8 @@ class AppConfig:
 
 
 def _chmod_private(path: Path) -> None:
+    # Windows profile ACLs are inherited. Avoid icacls here: changing ACLs while
+    # saving temporary/test files can make them unreadable and break rollback.
     if os.name != "nt" and path.exists():
         try:
             os.chmod(path, 0o600)
@@ -168,34 +199,52 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+def _write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(path.name + ".tmp")
+    try:
+        with temp.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 def load_config() -> AppConfig:
     raw = _read_json(CONFIG_PATH)
-    known = {field_name for field_name in AppConfig.__dataclass_fields__}
-    values = {key: value for key, value in raw.items() if key in known}
-    config = AppConfig(**values)
-
+    known = set(AppConfig.__dataclass_fields__)
+    config = AppConfig(**{key: value for key, value in raw.items() if key in known})
     secret_data = _read_json(SECRETS_PATH)
     config.http_auth_token = str(secret_data.get("http_auth_token", ""))
     config.control_plane_api_key = os.environ.get("CONTROL_PLANE_API_KEY", "")
+    if not config.audit_log.strip():
+        config.audit_log = _default_audit_log()
+    if config.transport == "streamable-http":
+        config.http_auth_mode = "bearer"
+        config.ensure_http_token()
     return config
 
 
 def save_config(config: AppConfig) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if config.transport == "streamable-http":
+        config.http_auth_mode = "bearer"
+        config.ensure_http_token()
+
     data = asdict(config)
     data.pop("control_plane_api_key", None)
     data.pop("http_auth_token", None)
-    CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_text_atomic(CONFIG_PATH, json.dumps(data, ensure_ascii=False, indent=2))
     _chmod_private(CONFIG_PATH)
 
     if config.http_auth_token:
-        SECRETS_PATH.write_text(
+        _write_text_atomic(
+            SECRETS_PATH,
             json.dumps({"http_auth_token": config.http_auth_token}, indent=2),
-            encoding="utf-8",
         )
         _chmod_private(SECRETS_PATH)
-    elif SECRETS_PATH.exists():
-        SECRETS_PATH.unlink()
+    else:
+        SECRETS_PATH.unlink(missing_ok=True)
 
 
 def apply_config_to_environment(config: AppConfig) -> None:
