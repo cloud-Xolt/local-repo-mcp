@@ -1,26 +1,19 @@
 # Security Policy
 
-## Supported versions
+Local Repo MCP is a single-user local tool for one configured Git repository.
+It is not a multi-tenant security boundary.
 
-Security fixes are applied to the latest release line.
+Expected controls include repository-root confinement, sensitive-path
+blocking, no general-purpose shell, bounded output, filtered Git inspection,
+validated text patches, target-scoped dirty-file protection, and mandatory
+Bearer authentication for Streamable HTTP.
 
-## Reporting a vulnerability
+STDIO has no application-level login because the MCP server communicates with
+its parent process over stdin/stdout. With OpenAI Secure MCP Tunnel,
+`tunnel-client` authenticates to the OpenAI control plane using the Runtime API
+Key. ChatGPT showing “No authentication” means no additional MCP OAuth flow is
+configured; it does not make the local server an anonymous public endpoint.
 
-Do not disclose suspected vulnerabilities in a public issue. Contact the maintainer privately through the security-reporting channel listed on the GitHub repository.
-
-Include:
-
-- affected version or commit;
-- operating system;
-- reproduction steps;
-- expected and actual behavior;
-- security impact;
-- a minimal proof of concept when safe to provide.
-
-## Security boundary
-
-Local Repo MCP is a single-user local tool for one configured Git repository. It is not a multi-tenant security boundary.
-
-Expected controls include repository-root confinement, sensitive-path blocking, no general-purpose shell, validated text patches, bounded outputs, filtered Git inspection, and optional HTTP authentication.
-
-Expected limitations include execution of repository code in test mode and incomplete credential-pattern detection. These limitations are documented in the README and are not by themselves vulnerabilities.
+Test mode executes repository code and must be enabled only for repositories
+the user trusts. Credential-pattern detection is defense in depth and is not a
+complete secret-scanning solution.

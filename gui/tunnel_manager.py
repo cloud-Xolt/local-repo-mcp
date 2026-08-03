@@ -16,10 +16,25 @@ LAUNCHER = ROOT / "launch_mcp.py"
 def _resolve_python(python: Path | None = None) -> Path:
     if python is not None:
         return python.resolve()
-    venv_python = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    venv_python = ROOT / ".venv" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
     if venv_python.is_file():
         return venv_python.resolve()
     return Path(sys.executable).resolve()
+
+
+def _roaming_dir() -> Path:
+    raw = os.environ.get("APPDATA", "").strip()
+    if raw:
+        expanded = os.path.expandvars(raw)
+        if not (os.name == "nt" and "%" in expanded):
+            return Path(expanded)
+    try:
+        home = Path.home()
+    except RuntimeError:
+        home = ROOT.parent
+    return home / "AppData" / "Roaming"
 
 
 class TunnelManager:
@@ -33,13 +48,15 @@ class TunnelManager:
 
     @staticmethod
     def profile_path(config: AppConfig) -> Path:
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-        return base / "tunnel-client" / f"{config.tunnel_profile.strip() or 'local-repo'}.yaml"
+        profile = config.tunnel_profile.strip() or "local-repo"
+        return _roaming_dir() / "tunnel-client" / f"{profile}.yaml"
 
     @staticmethod
     def stdio_command_text(python: Path | None = None) -> str:
-        parts = TunnelManager.build_mcp_command(python)
-        return " ".join(Path(part).as_posix() for part in parts)
+        return " ".join(
+            Path(part).as_posix()
+            for part in TunnelManager.build_mcp_command(python)
+        )
 
     def repair_profile_command(self, config: AppConfig) -> bool:
         if config.transport != "stdio":
@@ -51,6 +68,7 @@ class TunnelManager:
         content = path.read_text(encoding="utf-8")
         if expected in content and '\\"' not in content and "G:tmp" not in content:
             return False
+
         import re
 
         new_content, count = re.subn(
@@ -67,7 +85,7 @@ class TunnelManager:
     @staticmethod
     def resolve_executable(config: AppConfig) -> str:
         raw = config.tunnel_client_path.strip() or "tunnel-client"
-        expanded = str(Path(raw).expanduser()) if raw not in {"tunnel-client"} else raw
+        expanded = str(Path(raw).expanduser()) if raw != "tunnel-client" else raw
         resolved = shutil.which(expanded)
         if resolved:
             return resolved
@@ -79,11 +97,19 @@ class TunnelManager:
     def version(self, config: AppConfig) -> str:
         executable = self.resolve_executable(config)
         result = subprocess.run(
-            [executable, "--version"], text=True, capture_output=True,
-            timeout=10, check=False, shell=False,
+            [executable, "--version"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=10,
+            check=False,
+            shell=False,
         )
         if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "failed to read tunnel-client version")
+            raise RuntimeError(
+                result.stderr.strip() or "failed to read tunnel-client version"
+            )
         return result.stdout.strip() or result.stderr.strip() or executable
 
     @staticmethod
@@ -100,27 +126,42 @@ class TunnelManager:
             raise ValueError("Tunnel ID is required")
         if not config.tunnel_profile.strip():
             raise ValueError("Tunnel profile is required")
+        if config.transport != "stdio":
+            raise RuntimeError(
+                "Automatic HTTP Tunnel setup is disabled because Streamable "
+                "HTTP requires a custom Bearer token. Use STDIO Tunnel or "
+                "configure tunnel-client manually."
+            )
+
         command = [
-            executable, "init", "--profile", config.tunnel_profile.strip(),
-            "--tunnel-id", config.tunnel_id.strip(),
+            executable,
+            "init",
+            "--profile",
+            config.tunnel_profile.strip(),
+            "--tunnel-id",
+            config.tunnel_id.strip(),
+            "--sample",
+            "sample_mcp_stdio_local",
+            "--mcp-command",
+            self.stdio_command_text(),
         ]
-        if config.transport == "stdio":
-            command.extend([
-                "--sample", "sample_mcp_stdio_local",
-                "--mcp-command", self.stdio_command_text(),
-            ])
-        else:
-            if config.http_auth_mode == "bearer":
-                raise RuntimeError(
-                    "HTTP Tunnel setup with a custom Bearer token is not automated. "
-                    "Use STDIO Tunnel or configure tunnel-client manually."
-                )
-            command.extend(["--mcp-server-url", config.endpoint_url()])
         result = subprocess.run(
-            command, env=self._runtime_env(config), cwd=ROOT,
-            text=True, capture_output=True, timeout=60, check=False, shell=False,
+            command,
+            env=self._runtime_env(config),
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=60,
+            check=False,
+            shell=False,
         )
-        output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+        output = "\n".join(
+            part
+            for part in (result.stdout.strip(), result.stderr.strip())
+            if part
+        )
         if result.returncode != 0:
             raise RuntimeError(output or "tunnel-client init failed")
         return output or "Profile initialized"
@@ -137,20 +178,36 @@ class TunnelManager:
             return (
                 f"{version}\n\n{repair_note}"
                 f"Profile found: {path}\n"
-                "Set Runtime API Key, then run Doctor for full validation."
+                "Set Runtime API Key, then run Doctor."
             )
-        doctor = self.doctor(config)
-        return f"{version}\n\n{repair_note}{doctor}"
+        return f"{version}\n\n{repair_note}{self.doctor(config)}"
 
     def doctor(self, config: AppConfig) -> str:
         self.repair_profile_command(config)
         executable = self.resolve_executable(config)
         result = subprocess.run(
-            [executable, "doctor", "--profile", config.tunnel_profile.strip(), "--explain"],
-            env=self._runtime_env(config), cwd=ROOT,
-            text=True, capture_output=True, timeout=60, check=False, shell=False,
+            [
+                executable,
+                "doctor",
+                "--profile",
+                config.tunnel_profile.strip(),
+                "--explain",
+            ],
+            env=self._runtime_env(config),
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=60,
+            check=False,
+            shell=False,
         )
-        output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+        output = "\n".join(
+            part
+            for part in (result.stdout.strip(), result.stderr.strip())
+            if part
+        )
         if result.returncode != 0:
             raise RuntimeError(output or "tunnel-client doctor failed")
         return output or "Doctor passed"
@@ -158,8 +215,11 @@ class TunnelManager:
     def start(self, config: AppConfig) -> None:
         executable = self.resolve_executable(config)
         if config.transport == "streamable-http" and not self.processes.mcp.running:
-            raise RuntimeError("Start the Streamable HTTP MCP server before starting the Tunnel")
+            raise RuntimeError(
+                "Start the Streamable HTTP MCP server before starting the Tunnel"
+            )
         self.processes.tunnel.start(
             [executable, "run", "--profile", config.tunnel_profile.strip()],
-            env=self._runtime_env(config), cwd=ROOT,
+            env=self._runtime_env(config),
+            cwd=ROOT,
         )

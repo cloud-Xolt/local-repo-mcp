@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -18,6 +19,8 @@ class RuntimeContext:
     mcp: MCPServer
     repo_root: Path
     mode: Literal["read", "write", "test"]
+    transport: str
+    server_instance_id: str
     max_file_bytes: int
     max_patch_bytes: int
     max_search_results: int
@@ -51,16 +54,17 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
     max_search = _positive_int("MAX_SEARCH_RESULTS", 50, 1000)
     max_output = _positive_int("MAX_OUTPUT_BYTES", 20_000, 2_000_000)
     test_timeout = _positive_int("TEST_TIMEOUT_MAX", 300, 1800)
-    audit_path = os.environ.get("AUDIT_LOG", "").strip()
-    audit = AuditLogger(audit_path)
+    audit = AuditLogger(os.environ.get("AUDIT_LOG", "").strip())
 
     def runner(args: list[str], input_text: str | None = None, timeout: int = 30):
         return run_git(repo_root, args, input_text=input_text, timeout=timeout)
 
-    return RuntimeContext(
+    ctx = RuntimeContext(
         mcp=mcp,
         repo_root=repo_root,
         mode=_parse_mode(os.environ.get("MCP_MODE", "read")),
+        transport=os.environ.get("MCP_TRANSPORT", "stdio").strip().lower(),
+        server_instance_id=secrets.token_hex(8),
         max_file_bytes=max_file,
         max_patch_bytes=max_patch,
         max_search_results=max_search,
@@ -72,6 +76,8 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
         audit=audit if audit.enabled else None,
         test_runner=RepoTestRunner(repo_root, max_output, test_timeout),
     )
+    audit_event(ctx, event="server_start", status="success")
+    return ctx
 
 
 def require_mode(ctx: RuntimeContext, *modes: str) -> None:
@@ -80,5 +86,20 @@ def require_mode(ctx: RuntimeContext, *modes: str) -> None:
 
 
 def audit_event(ctx: RuntimeContext, **record) -> None:
-    if ctx.audit is not None:
-        ctx.audit.log(**record)
+    if ctx.audit is None:
+        return
+    payload = {
+        "event_id": secrets.token_hex(12),
+        "server_instance_id": ctx.server_instance_id,
+        "transport": ctx.transport,
+        "mode": ctx.mode,
+        "repository": ctx.repo_root.name,
+        "repository_hash": AuditLogger.hash_value(str(ctx.repo_root)),
+        "process_id": os.getpid(),
+    }
+    payload.update(record)
+    ctx.audit.log(**payload)
+
+
+def repository_info(ctx: RuntimeContext) -> dict[str, str]:
+    return {"name": ctx.repo_root.name, "root": str(ctx.repo_root)}

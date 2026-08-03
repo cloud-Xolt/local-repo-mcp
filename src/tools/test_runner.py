@@ -7,13 +7,102 @@ import sys
 from pathlib import Path
 
 TEST_COMMANDS = {
-    "python_pytest": [sys.executable, "-m", "pytest", "-q"],
+    "python_pytest": [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
     "go_test": ["go", "test", "./..."],
     "node_test": ["npm", "test", "--"],
     "node_lint": ["npm", "run", "lint", "--"],
     "maven_test": ["mvn", "test"],
     "gradle_test": ["./gradlew", "test"],
 }
+
+_ALLOWED_ENV = {
+    "PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "SYSTEMROOT",
+    "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP",
+    "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA",
+}
+
+
+def _expanded_value(value: str) -> str | None:
+    expanded = os.path.expandvars(value)
+    # Reject unresolved Windows-style placeholders on every host. This also
+    # makes Linux/macOS CI able to regression-test Windows environment input.
+    if "%" in expanded:
+        return None
+    return expanded
+
+
+def _valid_absolute_path(value: str | None) -> Path | None:
+    if not value:
+        return None
+    expanded = _expanded_value(value)
+    if not expanded:
+        return None
+    try:
+        candidate = Path(expanded).expanduser()
+    except RuntimeError:
+        return None
+    return candidate if candidate.is_absolute() else None
+
+
+def _safe_temp_root(repo_root: Path) -> Path:
+    candidates: list[Path] = []
+    for key in ("TEMP", "TMP"):
+        candidate = _valid_absolute_path(os.environ.get(key))
+        if candidate is not None:
+            candidates.append(candidate / "local-repo-mcp-tests")
+    local_appdata = _valid_absolute_path(os.environ.get("LOCALAPPDATA"))
+    if local_appdata is not None:
+        candidates.append(local_appdata / "Temp" / "local-repo-mcp-tests")
+    candidates.append(repo_root.resolve().parent / ".local-repo-mcp-tests")
+
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write-test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return candidate.resolve()
+        except OSError:
+            continue
+    raise RuntimeError("unable to create a safe external test directory")
+
+
+def _safe_environment(repo_root: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if key.upper() not in _ALLOWED_ENV:
+            continue
+        expanded = _expanded_value(value)
+        if expanded is not None:
+            env[key] = expanded
+
+    temp_root = _safe_temp_root(repo_root)
+    env["TEMP"] = str(temp_root)
+    env["TMP"] = str(temp_root)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPYCACHEPREFIX"] = str(temp_root / "pycache")
+    env.pop("PYTEST_ADDOPTS", None)
+
+    if os.name == "nt":
+        for key, suffix in (
+            ("HOME", "home"),
+            ("USERPROFILE", "home"),
+            ("APPDATA", "home/AppData/Roaming"),
+            ("LOCALAPPDATA", "home/AppData/Local"),
+        ):
+            if _valid_absolute_path(env.get(key)) is None:
+                target = temp_root / Path(suffix)
+                target.mkdir(parents=True, exist_ok=True)
+                env[key] = str(target)
+
+        system_drive = _expanded_value(env.get("SystemDrive", ""))
+        if not system_drive:
+            system_root = _valid_absolute_path(env.get("SystemRoot"))
+            drive = system_root.drive if system_root is not None else repo_root.drive
+            if drive:
+                env["SystemDrive"] = drive
+
+    return env
 
 
 def _truncate(value: str, max_bytes: int) -> tuple[str, bool]:
@@ -34,11 +123,6 @@ class RepoTestRunner:
             raise PermissionError(f"test command is not allowed: {command_key}")
         timeout = min(max(int(timeout_seconds), 1), self.max_timeout)
         command = TEST_COMMANDS[command_key]
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key in {"PATH", "HOME", "USER", "USERNAME", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA"}
-        }
         try:
             result = subprocess.run(
                 command,
@@ -47,7 +131,9 @@ class RepoTestRunner:
                 timeout=timeout,
                 capture_output=True,
                 text=True,
-                env=env,
+                encoding="utf-8",
+                errors="replace",
+                env=_safe_environment(self.repo_root),
                 check=False,
             )
             stdout, stdout_truncated = _truncate(result.stdout, self.max_output_bytes)

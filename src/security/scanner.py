@@ -15,10 +15,7 @@ _PATTERNS = (
 
 
 class SecretScanner:
-    """Blocks several common credential patterns in patch additions.
-
-    This is deliberately small and is not a complete secret-scanning solution.
-    """
+    """Small defense-in-depth scanner for added patch lines."""
 
     @staticmethod
     def added_text(patch: str) -> str:
@@ -28,8 +25,11 @@ class SecretScanner:
             if line.startswith("+") and not line.startswith("+++")
         )
 
-    def require_clean_patch(self, patch: str) -> None:
+    def scan_patch(self, patch: str) -> list[str]:
         added = self.added_text(patch)
-        for name, pattern in _PATTERNS:
-            if pattern.search(added):
-                raise PermissionError(f"patch appears to add a {name}")
+        return [name for name, pattern in _PATTERNS if pattern.search(added)]
+
+    def require_clean_patch(self, patch: str) -> None:
+        matches = self.scan_patch(patch)
+        if matches:
+            raise PermissionError("patch appears to add credential material: " + ", ".join(matches))
