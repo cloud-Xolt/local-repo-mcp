@@ -5,13 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from audit.logger import AuditLogger
-from tools.context import audit_event
+from tools.runtime import audit_event
 
 
 def test_audit_event_adds_metadata(tmp_path: Path) -> None:
     path = tmp_path / "audit.jsonl"
     ctx = SimpleNamespace(
         audit=AuditLogger(str(path)),
+        runtime_log=None,
         server_instance_id="instance",
         transport="stdio",
         mode="read",

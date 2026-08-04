@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
+
+from gui.config_codec import coerce_dataclass, protect_secret, unprotect_secret
+from gui.config_io import read_json_object
 
 APP_NAME = "local-repo-mcp"
 
@@ -56,6 +61,10 @@ def _default_audit_log() -> str:
     return str(CONFIG_DIR / "audit.jsonl")
 
 
+def _default_mcp_log() -> str:
+    return str(CONFIG_DIR / "mcp.jsonl")
+
+
 @dataclass
 class AppConfig:
     language: Literal["zh", "en"] = "zh"
@@ -73,6 +82,14 @@ class AppConfig:
     http_json_response: bool = True
     http_stateless: bool = True
     http_max_request_bytes: int = 262_144
+    http_public_url: str = ""
+    http_tls_certfile: str = ""
+    http_tls_keyfile: str = ""
+    http_tls_client_ca: str = ""
+    http_client_certfile: str = ""
+    http_client_keyfile: str = ""
+    http_tls_terminated_proxy: bool = False
+    http_proxy_trusted_ips: str = "127.0.0.1"
 
     max_file_bytes: int = 200_000
     max_patch_bytes: int = 200_000
@@ -80,16 +97,26 @@ class AppConfig:
     max_output_bytes: int = 20_000
     allow_dirty_worktree: bool = False
     audit_log: str = field(default_factory=_default_audit_log)
+    mcp_log: str = field(default_factory=_default_mcp_log)
+    log_max_bytes: int = 5_000_000
+    log_backup_count: int = 3
     test_timeout_max: int = 300
 
     tunnel_client_path: str = "tunnel-client"
     tunnel_id: str = ""
     tunnel_profile: str = "local-repo"
+    tunnel_profile_path: str = ""
 
     control_plane_api_key: str = field(default="", repr=False, compare=False)
     http_auth_token: str = field(default="", repr=False, compare=False)
 
     def endpoint_url(self) -> str:
+        public_url = self.http_public_url.strip()
+        if public_url:
+            return public_url.rstrip("/")
+        return self.runtime_endpoint_url()
+
+    def runtime_endpoint_url(self) -> str:
         host = self.http_host.strip() or "127.0.0.1"
         if host == "0.0.0.0":
             host = "127.0.0.1"
@@ -99,7 +126,15 @@ class AppConfig:
         path = self.http_path.strip() or "/mcp"
         if not path.startswith("/"):
             path = "/" + path
-        return f"http://{display_host}:{self.http_port}{path}"
+        scheme = "https" if self.http_tls_certfile.strip() else "http"
+        return f"{scheme}://{display_host}:{self.http_port}{path}"
+
+    def runtime_health_url(self) -> str:
+        endpoint = urlsplit(self.runtime_endpoint_url())
+        host = endpoint.hostname or "127.0.0.1"
+        display_host = f"[{host}]" if ":" in host else host
+        port = f":{endpoint.port}" if endpoint.port else ""
+        return f"{endpoint.scheme}://{display_host}{port}/healthz"
 
     def is_local_http(self) -> bool:
         return self.http_host.strip().lower() in {"127.0.0.1", "localhost", "::1"}
@@ -123,6 +158,23 @@ class AppConfig:
                 errors.append("repo_not_found")
             elif not repo.is_dir():
                 errors.append("repo_not_directory")
+            else:
+                try:
+                    result = subprocess.run(
+                        ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        capture_output=True,
+                        timeout=5,
+                        check=False,
+                        shell=False,
+                    )
+                except OSError:
+                    errors.append("git_required")
+                else:
+                    if result.returncode != 0 or result.stdout.strip() != "true":
+                        errors.append("repo_not_git")
 
         if self.mcp_mode not in {"read", "write", "test"}:
             errors.append("mode_invalid")
@@ -134,6 +186,8 @@ class AppConfig:
             (self.max_patch_bytes, "max_patch_invalid", 1, 5_000_000),
             (self.max_search_results, "max_search_invalid", 1, 1000),
             (self.max_output_bytes, "max_output_invalid", 1, 2_000_000),
+            (self.log_max_bytes, "log_max_bytes_invalid", 64_000, 100_000_000),
+            (self.log_backup_count, "log_backup_count_invalid", 1, 20),
             (self.test_timeout_max, "test_timeout_invalid", 1, 1800),
         ):
             if not isinstance(value, int) or not low <= value <= high:
@@ -154,7 +208,53 @@ class AppConfig:
                 errors.append("http_token_required")
             if not 1024 <= self.http_max_request_bytes <= 5_000_000:
                 errors.append("http_request_size_invalid")
-        return errors
+            has_cert = bool(self.http_tls_certfile.strip())
+            has_key = bool(self.http_tls_keyfile.strip())
+            if has_cert != has_key:
+                errors.append("http_tls_pair_required")
+            for value, key in (
+                (self.http_tls_certfile, "http_tls_cert_invalid"),
+                (self.http_tls_keyfile, "http_tls_key_invalid"),
+                (self.http_tls_client_ca, "http_tls_ca_invalid"),
+                (self.http_client_certfile, "http_client_cert_invalid"),
+                (self.http_client_keyfile, "http_client_key_invalid"),
+            ):
+                if value.strip() and not Path(value).expanduser().is_file():
+                    errors.append(key)
+            if self.http_tls_client_ca.strip() and not has_cert:
+                errors.append("http_tls_ca_requires_cert")
+            has_client_cert = bool(self.http_client_certfile.strip())
+            has_client_key = bool(self.http_client_keyfile.strip())
+            if has_client_cert != has_client_key:
+                errors.append("http_client_tls_pair_required")
+            if self.http_tls_client_ca.strip() and not (has_client_cert and has_client_key):
+                errors.append("http_client_cert_required")
+            if not self.is_local_http() and not has_cert and not self.http_tls_terminated_proxy:
+                errors.append("http_nonlocal_tls_required")
+            if self.http_tls_terminated_proxy:
+                parsed = urlsplit(self.http_public_url.strip())
+                if parsed.scheme != "https" or not parsed.netloc:
+                    errors.append("http_public_url_required")
+            public_url = self.http_public_url.strip()
+            if self.http_host.strip() in {"0.0.0.0", "::"} and not public_url:
+                errors.append("http_public_url_required")
+            if public_url:
+                parsed = urlsplit(public_url)
+                expected_path = (self.http_path.strip() or "/mcp").rstrip("/") or "/"
+                actual_path = parsed.path.rstrip("/") or "/"
+                if (
+                    parsed.scheme != "https"
+                    or not parsed.netloc
+                    or parsed.username is not None
+                    or parsed.password is not None
+                    or parsed.query
+                    or parsed.fragment
+                    or actual_path != expected_path
+                ):
+                    errors.append("http_public_url_invalid")
+            if self.http_tls_terminated_proxy and not self.http_proxy_trusted_ips.strip():
+                errors.append("http_proxy_trusted_ips_required")
+        return list(dict.fromkeys(errors))
 
     def mcp_env(self) -> dict[str, str]:
         auth_mode = "bearer" if self.transport == "streamable-http" else self.http_auth_mode
@@ -168,6 +268,9 @@ class AppConfig:
             "MAX_OUTPUT_BYTES": str(self.max_output_bytes),
             "ALLOW_DIRTY_WORKTREE": str(self.allow_dirty_worktree).lower(),
             "AUDIT_LOG": self.audit_log.strip(),
+            "MCP_LOG": self.mcp_log.strip(),
+            "LOG_MAX_BYTES": str(self.log_max_bytes),
+            "LOG_BACKUP_COUNT": str(self.log_backup_count),
             "TEST_TIMEOUT_MAX": str(self.test_timeout_max),
             "HTTP_HOST": self.http_host.strip() or "127.0.0.1",
             "HTTP_PORT": str(self.http_port),
@@ -179,6 +282,12 @@ class AppConfig:
             "HTTP_JSON_RESPONSE": str(self.http_json_response).lower(),
             "HTTP_STATELESS": str(self.http_stateless).lower(),
             "HTTP_MAX_REQUEST_BYTES": str(self.http_max_request_bytes),
+            "HTTP_PUBLIC_URL": self.http_public_url.strip(),
+            "HTTP_TLS_CERTFILE": self.http_tls_certfile.strip(),
+            "HTTP_TLS_KEYFILE": self.http_tls_keyfile.strip(),
+            "HTTP_TLS_CLIENT_CA": self.http_tls_client_ca.strip(),
+            "HTTP_TLS_TERMINATED_PROXY": str(self.http_tls_terminated_proxy).lower(),
+            "HTTP_PROXY_TRUSTED_IPS": self.http_proxy_trusted_ips.strip() or "127.0.0.1",
         }
 
 
@@ -192,33 +301,30 @@ def _chmod_private(path: Path) -> None:
             pass
 
 
-def _read_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
 def _write_text_atomic(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".tmp")
     try:
         with temp.open("w", encoding="utf-8", newline="\n") as handle:
             handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _chmod_private(temp)
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
 
 
 def load_config() -> AppConfig:
-    raw = _read_json(CONFIG_PATH)
-    known = set(AppConfig.__dataclass_fields__)
-    config = AppConfig(**{key: value for key, value in raw.items() if key in known})
-    secret_data = _read_json(SECRETS_PATH)
-    config.http_auth_token = str(secret_data.get("http_auth_token", ""))
+    raw = read_json_object(CONFIG_PATH)
+    config = coerce_dataclass(AppConfig, raw)
+    secret_data = read_json_object(SECRETS_PATH)
+    config.http_auth_token = unprotect_secret(secret_data)
     config.control_plane_api_key = os.environ.get("CONTROL_PLANE_API_KEY", "")
     if not config.audit_log.strip():
         config.audit_log = _default_audit_log()
+    if not config.mcp_log.strip():
+        config.mcp_log = _default_mcp_log()
     if config.transport == "streamable-http":
         config.http_auth_mode = "bearer"
         config.ensure_http_token()
@@ -238,18 +344,21 @@ def save_config(config: AppConfig) -> None:
     _chmod_private(CONFIG_PATH)
 
     if config.http_auth_token:
+        secret_payload = protect_secret(config.http_auth_token)
         _write_text_atomic(
             SECRETS_PATH,
-            json.dumps({"http_auth_token": config.http_auth_token}, indent=2),
+            json.dumps(secret_payload, indent=2),
         )
         _chmod_private(SECRETS_PATH)
     else:
         SECRETS_PATH.unlink(missing_ok=True)
 
 
-def apply_config_to_environment(config: AppConfig) -> None:
+def apply_config_to_environment(config: AppConfig, *, override: bool = True) -> None:
     for key, value in config.mcp_env().items():
-        if value == "" and key in {"HTTP_AUTH_TOKEN", "AUDIT_LOG"}:
+        if not override and key in os.environ:
+            continue
+        if value == "" and key in {"HTTP_AUTH_TOKEN", "AUDIT_LOG", "MCP_LOG"}:
             os.environ.pop(key, None)
         else:
             os.environ[key] = value

@@ -29,9 +29,8 @@ def test_api_key_is_never_persisted(tmp_path: Path, monkeypatch) -> None:
     persisted = config_path.read_text(encoding="utf-8")
     assert "runtime-key-not-for-disk" not in persisted
     assert "local-http-token" not in persisted
-    assert json.loads(
-        secrets_path.read_text(encoding="utf-8")
-    )["http_auth_token"] == "local-http-token"
+    assert secrets_path.is_file()
+    assert config_module.load_config().http_auth_token == "local-http-token"
 
 
 def test_http_defaults_to_bearer() -> None:

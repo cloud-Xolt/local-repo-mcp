@@ -11,8 +11,14 @@ build/
 .env
 *.log
 audit.jsonl
+*.jsonl
+*.jsonl.*
 config.json
 secrets.json
 sessions.json
 .DS_Store
 Thumbs.db
+*.invalid.*.json
+!README.md
+!README.zh-CN.md
+!SECURITY.md

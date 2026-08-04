@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 TEST_COMMANDS = {
+    "gui_smoke": [sys.executable, "-m", "gui.smoke"],
     "python_pytest": [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
     "go_test": ["go", "test", "./..."],
     "node_test": ["npm", "test", "--"],

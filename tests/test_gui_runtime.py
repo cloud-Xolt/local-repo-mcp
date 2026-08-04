@@ -8,8 +8,9 @@ import sys
 import time
 from pathlib import Path
 
-from gui.process_manager import ManagedProcess
-from gui.app import ASSETS, LocalRepoMCPApp
+from gui.processes import ManagedProcess
+from gui.app import ASSETS
+from gui.desktop import LocalRepoMCPApp
 from gui.theme import (
     BTN_HEIGHT,
     CARD_RADIUS,
@@ -21,7 +22,6 @@ from gui.theme import (
     INPUT_HEIGHT,
     SIDEBAR_WIDTH,
 )
-from gui.ui_overrides import PALETTE, install_ui_overrides
 
 
 def _pid_running(pid: int) -> bool:
@@ -75,7 +75,6 @@ def test_managed_process_stop_reaps_descendant(tmp_path: Path) -> None:
 
 
 def test_gui_uses_one_complete_design_system() -> None:
-    assert PALETTE is COLORS
     assert {
         "bg",
         "surface",
@@ -85,7 +84,7 @@ def test_gui_uses_one_complete_design_system() -> None:
         "primary_text",
         "accent",
         "danger",
-    }.issubset(PALETTE)
+    }.issubset(COLORS)
     assert SIDEBAR_WIDTH == 232
     assert INPUT_HEIGHT == BTN_HEIGHT == 44
     assert CARD_RADIUS >= 12
@@ -110,13 +109,6 @@ def test_desktop_icon_assets_are_packaged() -> None:
     init_source = inspect.getsource(LocalRepoMCPApp.__init__)
     assert "self.iconphoto" in init_source
     assert "self.iconbitmap" in init_source
-
-
-def test_legacy_ui_override_is_a_no_op() -> None:
-    class DummyApp:
-        pass
-
-    assert install_ui_overrides(DummyApp) is DummyApp
 
 
 def _relative_luminance(color: str) -> float:
