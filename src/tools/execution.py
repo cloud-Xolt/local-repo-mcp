@@ -10,6 +10,11 @@ from tools.runtime import RuntimeContext, audit_event, require_mode
 T = TypeVar("T")
 
 
+def _reason(exc: BaseException) -> str:
+    text = str(exc).strip() or type(exc).__name__
+    return text[:500]
+
+
 def execute(
     context: RuntimeContext,
     *,
@@ -18,6 +23,7 @@ def execute(
     operation: Callable[[], T],
     target: str = "",
     target_is_sensitive: bool = False,
+    result_status: Callable[[T], str] | None = None,
     **fields,
 ) -> T:
     """Run one MCP operation with one permission and audit boundary."""
@@ -29,22 +35,70 @@ def execute(
             record["target_hash"] = AuditLogger.hash_value(target)
         else:
             record["target"] = target
+
+    # This hidden preflight is intentionally written before an operation can
+    # mutate state or execute repository code. Strict audit failures therefore
+    # stop write/test operations before they begin.
+    audit_event(
+        context,
+        **record,
+        event="tool_preflight",
+        status="running",
+        hidden=True,
+    )
+
     try:
         require_mode(context, *modes)
-        result = operation()
-    except Exception as exc:
+    except PermissionError as exc:
         audit_event(
             context,
             **record,
-            status="denied" if isinstance(exc, PermissionError) else "failed",
+            status="denied",
+            denial_kind="permission_mode",
+            reason=_reason(exc),
             error_type=type(exc).__name__,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         raise
+
+    failure: BaseException | None = None
+    try:
+        result = operation()
+    except PermissionError as exc:
+        failure = exc
+        status, kind = "denied", "policy"
+    except (FileNotFoundError, ModuleNotFoundError) as exc:
+        failure = exc
+        status, kind = "unavailable", "environment"
+    except TimeoutError as exc:
+        failure = exc
+        status, kind = "failed", "timeout"
+    except Exception as exc:
+        failure = exc
+        status, kind = "failed", "execution"
+    else:
+        status = result_status(result) if result_status is not None else "success"
+        extra = {}
+        if isinstance(result, dict) and "returncode" in result:
+            extra["result_code"] = result["returncode"]
+        audit_event(
+            context,
+            **record,
+            **extra,
+            status=status,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return result
+
+    assert failure is not None
     audit_event(
         context,
         **record,
-        status="success",
+        status=status,
+        denial_kind=kind if status == "denied" else "",
+        failure_kind=kind if status != "denied" else "",
+        reason=_reason(failure),
+        error_type=type(failure).__name__,
         duration_ms=int((time.monotonic() - started) * 1000),
     )
-    return result
+    raise failure

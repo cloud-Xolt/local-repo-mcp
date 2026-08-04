@@ -4,7 +4,6 @@ import atexit
 import json
 import os
 import signal
-import ssl
 import subprocess
 import sys
 import threading
@@ -12,12 +11,11 @@ import time
 from collections import deque
 from pathlib import Path
 from urllib.error import URLError
-from urllib.parse import urlsplit, urlunsplit
-from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 from audit.logger import AuditLogger
 from gui.config import AppConfig
 from gui.log_safety import redact_log_text
+from gui.readiness import read_health_payload
 from gui.runtime_config import environment_for
 from mcp_app.runtime import launcher_command
 
@@ -237,23 +235,6 @@ class ManagedProcess:
         )
 
 
-def _health_url(config: AppConfig) -> str:
-    if config.http_tls_terminated_proxy:
-        endpoint = urlsplit(config.endpoint_url())
-        return urlunsplit((endpoint.scheme, endpoint.netloc, "/healthz", "", ""))
-    return config.runtime_health_url()
-
-
-def _tls_context(config: AppConfig, url: str) -> ssl.SSLContext:
-    parsed = urlsplit(url)
-    cafile = None
-    if parsed.scheme == "https" and not config.http_tls_terminated_proxy:
-        cafile = config.http_tls_certfile.strip() or None
-    context = ssl.create_default_context(cafile=cafile)
-    if config.http_client_certfile.strip() and config.http_client_keyfile.strip():
-        context.load_cert_chain(config.http_client_certfile, config.http_client_keyfile)
-    return context
-
 
 class ProcessManager:
     def __init__(self) -> None:
@@ -272,24 +253,11 @@ class ProcessManager:
     def _wait_http_ready(self, config: AppConfig, timeout: float = 15.0) -> None:
         deadline = time.monotonic() + timeout
         last_error = "service did not become ready"
-        health_url = _health_url(config)
-        parsed = urlsplit(health_url)
-        handlers = [ProxyHandler({})]
-        if parsed.scheme == "https":
-            handlers.append(HTTPSHandler(context=_tls_context(config, health_url)))
-        opener = build_opener(*handlers)
-
         while time.monotonic() < deadline:
             if not self.mcp.running:
                 raise RuntimeError(self.mcp.failure_summary())
             try:
-                request = Request(
-                    health_url,
-                    headers={"Authorization": f"Bearer {config.http_auth_token}"},
-                    method="GET",
-                )
-                with opener.open(request, timeout=1.5) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
+                payload = read_health_payload(config, timeout=1.5)
                 expected = AuditLogger.hash_value(
                     str(Path(config.repo_root).expanduser().resolve())
                 )

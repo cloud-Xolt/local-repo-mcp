@@ -24,7 +24,7 @@ class WorktreeInfo:
 
 def _run_git(path: Path, *args: str, timeout: int = 10) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(path), *args],
+        ["git", "-C", str(path), "-c", f"safe.directory={path.resolve()}", *args],
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -67,7 +67,7 @@ def inspect_worktree(path: str | Path) -> WorktreeInfo:
 
     if result.returncode != 0 or not result.stdout.strip():
         detail = (result.stderr or result.stdout).strip()
-        status = "not_git" if "not a git repository" in detail.lower() else "error"
+        status = "not_git" if result.returncode == 128 else "error"
         return WorktreeInfo(status, candidate, detail=detail or "Git repository check failed")
 
     root = Path(result.stdout.strip()).expanduser().resolve()

@@ -33,6 +33,7 @@ STATUS = {
     "failed": ("失败", "Failed", "✕"),
     "error": ("失败", "Failed", "✕"),
     "denied": ("拒绝", "Denied", "⛔"),
+    "unavailable": ("环境不可用", "Unavailable", "?"),
 }
 _PROCESS_TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(.*)$")
 _EXIT_CODE = re.compile(r"exited with code\s+(-?\d+)", re.IGNORECASE)
@@ -70,7 +71,7 @@ def level_of(event: dict[str, Any]) -> str:
     status = str(event.get("status", "success")).lower()
     if status == "denied":
         return "SECURITY"
-    if status in {"failed", "error"}:
+    if status in {"failed", "error", "unavailable"}:
         return "ERROR"
     if status in {"warning", "warn"}:
         return "WARN"
@@ -156,6 +157,8 @@ def filter_events(
     expected = level.strip().upper()
     output: list[dict[str, Any]] = []
     for event in events:
+        if event.get("hidden"):
+            continue
         event_level = level_of(event)
         if expected != "ALL" and event_level != expected:
             continue
@@ -197,6 +200,12 @@ def event_row(event: dict[str, Any], language: str) -> str:
     status = str(event.get("status", "success")).lower()
     label = STATUS.get(status, (status, status, "•"))
     status_text = label[0] if language == "zh" else label[1]
+    if status == "denied":
+        kind = str(event.get("denial_kind", ""))
+        if kind == "permission_mode":
+            status_text = "权限拒绝" if language == "zh" else "Permission denied"
+        elif kind == "policy":
+            status_text = "策略拒绝" if language == "zh" else "Policy denied"
     source = str(event.get("source", "mcp")).upper()[:6]
     target = str(event.get("target") or event.get("repository") or "")
     targets = event.get("targets")
@@ -227,6 +236,10 @@ def event_details(event: dict[str, Any], language: str, *, raw: bool = False) ->
         ("transport", ("传输", "Transport")),
         ("process_id", ("进程", "Process")),
         ("event_id", ("事件 ID", "Event ID")),
+        ("denial_kind", ("拒绝类型", "Denial kind")),
+        ("failure_kind", ("失败类型", "Failure kind")),
+        ("reason", ("原因", "Reason")),
+        ("result_code", ("退出码", "Exit code")),
         ("error_type", ("错误类型", "Error type")),
         ("message", ("消息", "Message")),
     ):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -40,7 +41,7 @@ def test_proxy_wildcard_configuration_is_supported(tmp_path: Path) -> None:
         repo_root=str(tmp_path),
         transport="streamable-http",
         http_host="0.0.0.0",
-        http_auth_token="x" * 32,
+        http_auth_token=secrets.token_urlsafe(32),
         http_allowed_hosts="example.test",
         http_public_url="https://example.test/mcp",
         http_tls_terminated_proxy=True,
@@ -55,7 +56,7 @@ def test_proxy_always_requires_public_url(tmp_path: Path) -> None:
         repo_root=str(tmp_path),
         transport="streamable-http",
         http_host="127.0.0.1",
-        http_auth_token="x" * 32,
+        http_auth_token=secrets.token_urlsafe(32),
         http_tls_terminated_proxy=True,
         http_proxy_trusted_ips="127.0.0.1",
     )
@@ -68,7 +69,7 @@ def test_public_url_must_match_mcp_path(tmp_path: Path) -> None:
         repo_root=str(tmp_path),
         transport="streamable-http",
         http_host="0.0.0.0",
-        http_auth_token="x" * 32,
+        http_auth_token=secrets.token_urlsafe(32),
         http_allowed_hosts="example.test",
         http_public_url="https://example.test/wrong",
         http_tls_terminated_proxy=True,
@@ -87,7 +88,7 @@ def test_mtls_gui_connection_requires_client_identity(tmp_path: Path) -> None:
     config = AppConfig(
         repo_root=str(tmp_path),
         transport="streamable-http",
-        http_auth_token="x" * 32,
+        http_auth_token=secrets.token_urlsafe(32),
         http_tls_certfile=str(cert),
         http_tls_keyfile=str(key),
         http_tls_client_ca=str(ca),

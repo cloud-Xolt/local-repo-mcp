@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import asyncio
 import io
 import os
@@ -231,7 +232,7 @@ def test_nonzero_process_exit_is_logged_as_error() -> None:
 
 
 def test_proxy_policy_requires_https_but_accepts_forwarded_end_user() -> None:
-    token = "x" * 32
+    token = secrets.token_urlsafe(32)
     settings = HttpSecuritySettings.build(
         token=token,
         protected_path="/mcp",

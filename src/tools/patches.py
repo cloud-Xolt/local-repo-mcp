@@ -44,13 +44,13 @@ def register_patch_tools(context: RuntimeContext) -> None:
                 context.git.apply_patch_check(patch)
                 context.git.apply_patch(patch)
 
-            diff = context.git.diff_filtered(staged=False)
+            diff = context.git.diff_for_paths(targets)
             audit_event(
                 context,
                 event="patch_result",
                 status="success",
                 targets=targets,
-                result_hash=AuditLogger.hash_value(diff.get("diff", "")),
+                result_hash=diff["full_hash"],
             )
             return {
                 "applied": True,
@@ -60,7 +60,8 @@ def register_patch_tools(context: RuntimeContext) -> None:
                 "warning": context.git.branch_warning(),
                 "diff": diff.get("diff", ""),
                 "truncated": diff.get("truncated", False),
-                "hidden_files": diff.get("hidden_files", 0),
+                "result_hash": diff["full_hash"],
+                "hidden_files": 0,
             }
 
         try:

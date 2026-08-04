@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_final_gui_composition_smoke() -> None:
-    assert TEST_COMMANDS["gui_smoke"][1:] == ["run_gui.py", "--smoke"]
+    assert "gui_smoke" not in TEST_COMMANDS
     main()
 
 

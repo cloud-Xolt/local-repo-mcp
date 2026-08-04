@@ -20,3 +20,9 @@ Run the full regression suite with:
 ```bash
 python -m pytest -q -p no:cacheprovider
 ```
+
+- Policy and environment denials are separated from permission-mode denials and include a visible reason.
+- Write/test auditing is fail-closed, patch evidence is target-scoped, and test/search resource limits terminate safely.
+- Native TLS readiness validates public SNI while connecting to the local listener.
+- Wheel installation and execution are validated outside the source checkout.
+

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -65,6 +66,12 @@ def run_git(
     timeout: int = 30,
 ) -> subprocess.CompletedProcess[str]:
     command = ["git", "-C", str(repo_root), "-c", f"safe.directory={repo_root}", *args]
+    environment = os.environ.copy()
+    environment.update({
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_PAGER": "cat",
+        "GIT_EDITOR": "true",
+    })
     if input_text is None:
         return subprocess.run(
             command,
@@ -75,6 +82,7 @@ def run_git(
             timeout=timeout,
             check=False,
             shell=False,
+            env=environment,
         )
 
     normalized = input_text.replace("\r\n", "\n").replace("\r", "\n")
@@ -85,6 +93,7 @@ def run_git(
         timeout=timeout,
         check=False,
         shell=False,
+        env=environment,
     )
     return subprocess.CompletedProcess(
         args=binary_result.args,

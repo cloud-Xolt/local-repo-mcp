@@ -15,6 +15,10 @@ _OPENAI_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
 _QUERY_SECRET = re.compile(
     r"(?i)([?&](?:token|api_key|apikey|access_token)=)([^&#\s]+)"
 )
+_JSON_SECRET = re.compile(
+    r'(?i)(["\'](?:HTTP_AUTH_TOKEN|CONTROL_PLANE_API_KEY|OPENAI_API_KEY|'
+    r'RUNTIME_API_KEY|API_KEY|ACCESS_TOKEN)["\']\s*:\s*["\'])([^"\']+)(["\'])'
+)
 
 
 def redact_log_text(value: str) -> str:
@@ -25,4 +29,5 @@ def redact_log_text(value: str) -> str:
     text = _BEARER.sub(r"\1<redacted>", text)
     text = _NAMED_SECRET.sub(r"\1\2<redacted>", text)
     text = _OPENAI_KEY.sub("sk-<redacted>", text)
+    text = _JSON_SECRET.sub(r"\1<redacted>\3", text)
     return _QUERY_SECRET.sub(r"\1<redacted>", text)

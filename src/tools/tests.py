@@ -12,6 +12,12 @@ def register_test_tools(context: RuntimeContext) -> None:
         command_key: str,
         timeout_seconds: int = 120,
     ) -> dict[str, Any]:
+        """Run an allowlisted repository test command.
+
+        Supported keys are python_pytest, go_test, node_test, node_lint,
+        maven_test, and gradle_test. Test mode grants access to this tool;
+        the command key remains independently constrained by policy.
+        """
         result = execute(
             context,
             tool="repo_run_test",
@@ -19,6 +25,9 @@ def register_test_tools(context: RuntimeContext) -> None:
             operation=lambda: context.test_runner.run(
                 command_key,
                 timeout_seconds,
+            ),
+            result_status=lambda value: (
+                "success" if int(value.get("returncode", 1)) == 0 else "failed"
             ),
             command_key=command_key,
         )
