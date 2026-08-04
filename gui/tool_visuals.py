@@ -5,6 +5,7 @@ from tkinter import Canvas
 
 import customtkinter as ctk
 
+from gui.colors import resolve_color
 from gui.theme import COLORS, FONT_BODY, FONT_SMALL
 
 
@@ -16,32 +17,26 @@ class ToolVisual:
     description_zh: str
     description_en: str
     color: str
-    soft_light: str
-    soft_dark: str
     icon: str
 
 
 TOOL_VISUALS = (
-    ToolVisual("repo_list_files", "列出仓库文件", "List repository files", "查看仓库中的文件与目录结构", "Inspect repository files and directories", "#5B6EE1", "#EEF0FF", "#22294A", "list"),
-    ToolVisual("repo_read_file", "读取文件", "Read file", "读取仓库中的 UTF-8 文本文件", "Read UTF-8 text from the repository", "#2E8BC0", "#E8F5FC", "#173544", "document"),
-    ToolVisual("repo_search_code", "搜索代码", "Search code", "执行受限的固定字符串检索", "Run bounded fixed-string search", "#8B5CF6", "#F2ECFF", "#33244C", "search"),
-    ToolVisual("repo_git_status", "查看 Git 状态", "Read Git status", "查看经过敏感路径过滤的工作区状态", "Read filtered worktree status", "#29966F", "#E7F7F1", "#173D31", "branch"),
-    ToolVisual("repo_git_diff", "查看 Git 差异", "Read Git diff", "查看受限且经过过滤的代码差异", "Read bounded and filtered diffs", "#C47A22", "#FFF4E5", "#49321B", "diff"),
-    ToolVisual("repo_apply_patch", "应用代码修改", "Apply code changes", "应用经过校验的统一文本修改", "Apply validated unified text changes", "#D65A45", "#FFF0ED", "#4A2722", "patch"),
-    ToolVisual("repo_run_test", "运行测试", "Run tests", "运行预定义的可信仓库测试", "Run predefined trusted tests", "#B54AA5", "#FBEAF8", "#44213E", "test"),
+    ToolVisual("repo_list_files", "列出仓库文件", "List repository files", "查看仓库中的文件与目录结构", "Inspect repository files and directories", "#5B6EE1", "list"),
+    ToolVisual("repo_read_file", "读取文件", "Read file", "读取仓库中的 UTF-8 文本文件", "Read UTF-8 text from the repository", "#2E8BC0", "document"),
+    ToolVisual("repo_search_code", "搜索代码", "Search code", "执行受限的固定字符串检索", "Run bounded fixed-string search", "#8B5CF6", "search"),
+    ToolVisual("repo_git_status", "查看 Git 状态", "Read Git status", "查看经过敏感路径过滤的工作区状态", "Read filtered worktree status", "#29966F", "branch"),
+    ToolVisual("repo_git_diff", "查看 Git 差异", "Read Git diff", "查看受限且经过过滤的代码差异", "Read bounded and filtered diffs", "#C47A22", "diff"),
+    ToolVisual("repo_apply_patch", "应用代码修改", "Apply code changes", "应用经过校验的统一文本修改", "Apply validated unified text changes", "#D65A45", "patch"),
+    ToolVisual("repo_run_test", "运行测试", "Run tests", "运行预定义的可信仓库测试", "Run predefined trusted tests", "#B54AA5", "test"),
 )
 VISUAL_BY_NAME = {item.name: item for item in TOOL_VISUALS}
-
-
-def _appearance_color(light: str, dark: str) -> str:
-    return dark if ctk.get_appearance_mode().lower() == "dark" else light
 
 
 class ToolIcon(Canvas):
     """DPI-friendly vector icon rendered with Tk canvas primitives."""
 
     def __init__(self, master, visual: ToolVisual, size: int = 42) -> None:
-        background = _appearance_color(visual.soft_light, visual.soft_dark)
+        background = resolve_color(COLORS["surface_alt"])
         super().__init__(
             master,
             width=size,
@@ -68,16 +63,6 @@ class ToolIcon(Canvas):
 
     def _draw(self) -> None:
         s = self.size
-        self.create_rectangle(
-            1,
-            1,
-            s - 1,
-            s - 1,
-            fill=_appearance_color(
-                self.visual.soft_light, self.visual.soft_dark
-            ),
-            outline="",
-        )
         kind = self.visual.icon
         if kind == "list":
             for y in (13, 21, 29):
@@ -139,7 +124,7 @@ def build_tool_grid(app, parent, tools: list[str] | None = None) -> None:
             card,
             width=48,
             height=48,
-            fg_color=(visual.soft_light, visual.soft_dark),
+            fg_color="transparent",
             corner_radius=12,
         )
         icon_wrap.grid(row=0, column=0, rowspan=2, padx=13, pady=13)

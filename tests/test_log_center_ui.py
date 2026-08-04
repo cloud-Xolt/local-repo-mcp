@@ -124,3 +124,12 @@ def test_managed_process_clears_logs_by_default(tmp_path: Path) -> None:
         process._reader.join(timeout=2)
 
     assert all("old diagnostic" not in line for line in process.snapshot())
+
+
+def test_any_nonzero_process_exit_is_an_error() -> None:
+    event = parse_process_lines(
+        ["2026-08-04 12:00:00  [MCP exited with code 2]"],
+        "mcp",
+    )[0]
+    assert event["status"] == "failed"
+    assert event["level"] == "ERROR"

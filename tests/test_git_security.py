@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from conftest import commit_all, init_repo
+from repo.controller import GitController
 from repo.git import (
-    GitController,
     parse_deleted_patch_paths,
     run_git,
 )

@@ -52,10 +52,10 @@ def parse_name_status_z(raw: str) -> list[ChangeRecord]:
         if status[:1] in {"R", "C"}:
             if index + 1 >= len(tokens):
                 break
-            source = _path(tokens[index])
-            destination = _path(tokens[index + 1])
+            new_path = _path(tokens[index])
+            old_path = _path(tokens[index + 1])
             index += 2
-            records.append(ChangeRecord(status=status, paths=(destination, source)))
+            records.append(ChangeRecord(status=status, paths=(new_path, old_path)))
         else:
             records.append(ChangeRecord(status=status, paths=(_path(tokens[index]),)))
             index += 1

@@ -37,17 +37,20 @@ class LogFileLock:
     def __enter__(self) -> "LogFileLock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = self.path.open("a+b")
-        self._handle.seek(0, os.SEEK_END)
-        if self._handle.tell() == 0:
-            self._handle.write(b"0")
-            self._handle.flush()
-        deadline = time.monotonic() + self.timeout
-        while not self._try_lock():
-            if time.monotonic() >= deadline:
-                self._handle.close()
-                self._handle = None
-                raise TimeoutError("log file lock timed out")
-            time.sleep(0.02)
+        try:
+            self._handle.seek(0, os.SEEK_END)
+            if self._handle.tell() == 0:
+                self._handle.write(b"0")
+                self._handle.flush()
+            deadline = time.monotonic() + self.timeout
+            while not self._try_lock():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("log file lock timed out")
+                time.sleep(0.02)
+        except BaseException:
+            self._handle.close()
+            self._handle = None
+            raise
         return self
 
     def __exit__(

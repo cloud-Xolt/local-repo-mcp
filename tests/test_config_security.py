@@ -76,3 +76,24 @@ def test_load_migrates_legacy_http_config(tmp_path: Path, monkeypatch) -> None:
     assert loaded.http_auth_mode == "bearer"
     assert len(loaded.http_auth_token) >= 32
     assert loaded.audit_log
+
+
+def test_config_rejects_weak_http_token(tmp_path: Path) -> None:
+    cfg = AppConfig(
+        repo_root=str(tmp_path),
+        transport="streamable-http",
+        http_auth_token="weak",
+    )
+    assert "http_token_weak" in cfg.validate()
+
+
+def test_config_rejects_child_directory_as_repository_boundary(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    child = tmp_path / "child"
+    child.mkdir()
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    errors = AppConfig(repo_root=str(child)).validate()
+    assert "repo_not_git_root" in errors

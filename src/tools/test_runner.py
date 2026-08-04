@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 TEST_COMMANDS = {
-    "gui_smoke": [sys.executable, "-m", "gui.smoke"],
+    "gui_smoke": [sys.executable, "run_gui.py", "--smoke"],
     "python_pytest": [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
     "go_test": ["go", "test", "./..."],
     "node_test": ["npm", "test", "--"],
@@ -21,6 +21,15 @@ _ALLOWED_ENV = {
     "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP",
     "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA",
 }
+
+
+def _env_icase_lookup(env: dict[str, str], target: str) -> str:
+    """Case-insensitive lookup for Windows environment variables."""
+    target_upper = target.upper()
+    for key, value in env.items():
+        if key.upper() == target_upper:
+            return value
+    return ""
 
 
 def _expanded_value(value: str) -> str | None:
@@ -96,9 +105,13 @@ def _safe_environment(repo_root: Path) -> dict[str, str]:
                 target.mkdir(parents=True, exist_ok=True)
                 env[key] = str(target)
 
-        system_drive = _expanded_value(env.get("SystemDrive", ""))
-        if not system_drive:
-            system_root = _valid_absolute_path(env.get("SystemRoot"))
+        system_drive_value = _expanded_value(
+            _env_icase_lookup(env, "SystemDrive")
+        )
+        if not system_drive_value:
+            system_root = _valid_absolute_path(
+                _env_icase_lookup(env, "SystemRoot")
+            )
             drive = system_root.drive if system_root is not None else repo_root.drive
             if drive:
                 env["SystemDrive"] = drive
@@ -110,7 +123,7 @@ def _truncate(value: str, max_bytes: int) -> tuple[str, bool]:
     raw = value.encode("utf-8", errors="replace")
     if len(raw) <= max_bytes:
         return value, False
-    return raw[-max_bytes:].decode("utf-8", errors="replace"), True
+    return raw[:max_bytes].decode("utf-8", errors="replace"), True
 
 
 class RepoTestRunner:

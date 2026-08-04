@@ -1,6 +1,7 @@
 import subprocess
 
-from repo.git import GitController, run_git
+from repo.controller import GitController
+from repo.git import run_git
 
 
 def _track_env(repo_root) -> None:

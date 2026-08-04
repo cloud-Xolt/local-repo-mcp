@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -12,6 +11,7 @@ from urllib.parse import urlsplit
 
 from gui.config_codec import coerce_dataclass, protect_secret, unprotect_secret
 from gui.config_io import read_json_object
+from repo.worktree import inspect_worktree
 
 APP_NAME = "local-repo-mcp"
 
@@ -150,31 +150,17 @@ class AppConfig:
         if not repo_text:
             errors.append("repo_required")
         else:
-            try:
-                repo = Path(repo_text).expanduser()
-            except RuntimeError:
-                repo = Path(repo_text)
-            if not repo.exists():
+            info = inspect_worktree(repo_text)
+            if info.status == "missing":
                 errors.append("repo_not_found")
-            elif not repo.is_dir():
+            elif info.status == "not_directory":
                 errors.append("repo_not_directory")
-            else:
-                try:
-                    result = subprocess.run(
-                        ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        capture_output=True,
-                        timeout=5,
-                        check=False,
-                        shell=False,
-                    )
-                except OSError:
-                    errors.append("git_required")
-                else:
-                    if result.returncode != 0 or result.stdout.strip() != "true":
-                        errors.append("repo_not_git")
+            elif info.status == "git_missing":
+                errors.append("git_required")
+            elif not info.ready:
+                errors.append("repo_not_git")
+            elif not info.is_root:
+                errors.append("repo_not_git_root")
 
         if self.mcp_mode not in {"read", "write", "test"}:
             errors.append("mode_invalid")
@@ -206,6 +192,8 @@ class AppConfig:
                 errors.append("http_nonlocal_hosts_required")
             if not self.http_auth_token:
                 errors.append("http_token_required")
+            elif len(self.http_auth_token.strip()) < 32:
+                errors.append("http_token_weak")
             if not 1024 <= self.http_max_request_bytes <= 5_000_000:
                 errors.append("http_request_size_invalid")
             has_cert = bool(self.http_tls_certfile.strip())
@@ -258,8 +246,7 @@ class AppConfig:
 
     def mcp_env(self) -> dict[str, str]:
         auth_mode = "bearer" if self.transport == "streamable-http" else self.http_auth_mode
-        return {
-            "REPO_ROOT": str(Path(self.repo_root).expanduser().resolve()) if self.repo_root else "",
+        environment = {
             "MCP_MODE": self.mcp_mode,
             "MCP_TRANSPORT": self.transport,
             "MAX_FILE_BYTES": str(self.max_file_bytes),
@@ -289,6 +276,12 @@ class AppConfig:
             "HTTP_TLS_TERMINATED_PROXY": str(self.http_tls_terminated_proxy).lower(),
             "HTTP_PROXY_TRUSTED_IPS": self.http_proxy_trusted_ips.strip() or "127.0.0.1",
         }
+
+        if self.repo_root.strip():
+            environment["REPO_ROOT"] = str(
+                Path(self.repo_root).expanduser().resolve()
+            )
+        return environment
 
 
 def _chmod_private(path: Path) -> None:
@@ -353,12 +346,3 @@ def save_config(config: AppConfig) -> None:
     else:
         SECRETS_PATH.unlink(missing_ok=True)
 
-
-def apply_config_to_environment(config: AppConfig, *, override: bool = True) -> None:
-    for key, value in config.mcp_env().items():
-        if not override and key in os.environ:
-            continue
-        if value == "" and key in {"HTTP_AUTH_TOKEN", "AUDIT_LOG", "MCP_LOG"}:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = value

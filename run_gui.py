@@ -12,6 +12,11 @@ from gui.desktop import LocalRepoMCPApp
 
 
 def main() -> None:
+    if "--smoke" in sys.argv[1:]:
+        from gui.smoke import main as smoke_main
+
+        smoke_main()
+        return
     LocalRepoMCPApp().mainloop()
 
 

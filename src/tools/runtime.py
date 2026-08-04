@@ -38,6 +38,19 @@ class RuntimeContext:
     patch_lock: RepositoryLock
 
 
+def _parse_bool(value: str, *, default: bool) -> bool:
+    raw = value.strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(
+        f"invalid boolean value {value!r}; expected true/false, 1/0, yes/no, on/off"
+    )
+
+
 def _positive_int(name: str, default: int, maximum: int) -> int:
     try:
         value = int(os.environ.get(name, str(default)))
@@ -45,7 +58,15 @@ def _positive_int(name: str, default: int, maximum: int) -> int:
         raise RuntimeError(f"{name} must be an integer") from exc
     if value <= 0:
         raise RuntimeError(f"{name} must be greater than zero")
-    return min(value, maximum)
+    if value > maximum:
+        import sys
+        print(
+            f"Local Repo MCP: {name}={value} exceeds maximum ({maximum}), "
+            f"clamping to {maximum}",
+            file=sys.stderr,
+        )
+        return maximum
+    return value
 
 
 def _parse_mode(value: str) -> Literal["read", "write", "test"]:
@@ -95,10 +116,9 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
         max_patch_bytes=max_patch,
         max_search_results=max_search,
         max_output_bytes=max_output,
-        allow_dirty_worktree=os.environ.get(
-            "ALLOW_DIRTY_WORKTREE", "false"
-        ).lower()
-        == "true",
+        allow_dirty_worktree=_parse_bool(
+            os.environ.get("ALLOW_DIRTY_WORKTREE", ""), default=False
+        ),
         filesystem=RepoFilesystem(repo_root, max_file),
         git=GitController(repo_root, runner, max_output),
         scanner=SecretScanner(),

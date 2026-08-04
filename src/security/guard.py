@@ -60,6 +60,8 @@ def is_write_denied(path: str) -> bool:
 
 def resolve_repo_path(repo_root: Path, user_path: str) -> tuple[Path, str]:
     root = repo_root.resolve()
+    if root.is_symlink():
+        raise PermissionError("symbolic links are not allowed")
     raw_text = (user_path or ".").strip()
     raw = Path(raw_text or ".")
     if raw.is_absolute():
@@ -137,6 +139,9 @@ def list_files(base: Path, repo_root: Path, limit: int) -> tuple[list[str], bool
 
 
 def read_text_file(path: Path, max_bytes: int) -> tuple[str, int]:
+    # Re-validate to narrow the TOCTOU window between initial check and read.
+    if path.is_symlink():
+        raise PermissionError("symbolic links are not allowed")
     size = path.stat().st_size
     if size > max_bytes:
         raise PermissionError(f"file exceeds limit: {size} > {max_bytes}")
