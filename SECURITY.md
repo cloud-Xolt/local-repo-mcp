@@ -1,19 +1,25 @@
 # Security Policy
 
-Local Repo MCP is a single-user local tool for one configured Git repository.
-It is not a multi-tenant security boundary.
+Local Repo MCP exposes one explicitly configured Git working tree. It is not a general shell, multi-user agent runtime, or sandbox for untrusted code.
 
-Expected controls include repository-root confinement, sensitive-path
-blocking, no general-purpose shell, bounded output, filtered Git inspection,
-validated text patches, target-scoped dirty-file protection, and mandatory
-Bearer authentication for Streamable HTTP.
+## Security boundary
 
-STDIO has no application-level login because the MCP server communicates with
-its parent process over stdin/stdout. With OpenAI Secure MCP Tunnel,
-`tunnel-client` authenticates to the OpenAI control plane using the Runtime API
-Key. ChatGPT showing “No authentication” means no additional MCP OAuth flow is
-configured; it does not make the local server an anonymous public endpoint.
+- Repository paths reject absolute paths, parent traversal, symbolic links, sensitive paths, and multi-link files.
+- Reads, search results, Git output, HTTP requests, patches, and test output are bounded.
+- Writes are accepted only as validated unified text patches.
+- Repository mutations use a cross-process lock stored in shared Git metadata.
+- Streamable HTTP always requires Bearer authentication.
+- Remote HTTP requires native TLS or an explicitly configured trusted TLS reverse proxy.
+- Proxy headers are accepted only from `HTTP_PROXY_TRUSTED_IPS`.
+- Windows stores the HTTP token with current-user DPAPI; POSIX secret files use restrictive permissions.
+- Control-plane Runtime API keys are not persisted by the GUI.
 
-Test mode executes repository code and must be enabled only for repositories
-the user trusts. Credential-pattern detection is defense in depth and is not a
-complete secret-scanning solution.
+## Trusted test execution
+
+Test mode executes predefined commands from the selected repository with the current user's operating-system permissions. It is not sandboxed. Enable test mode only for repositories whose code and test configuration you trust.
+
+Runtime logs are operational diagnostics. Audit logs are security metadata. Both are bounded and rotated, but operators must protect the configured log directory and apply their normal retention policy.
+
+## Reporting
+
+Report security issues privately to the repository maintainer. Do not include live credentials, customer data, or exploit output in public issues.

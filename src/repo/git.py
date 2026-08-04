@@ -100,7 +100,7 @@ class GitController:
             status = token[:2]
             path = token[3:] if token[2:3] == " " else token[2:]
             if status[0] in {"R", "C"} and index < len(tokens):
-                path = tokens[index]
+                # Porcelain v1 -z emits destination first, then source.
                 index += 1
             normalized = path.replace("\\", "/")
             if is_read_denied(normalized):
@@ -150,7 +150,7 @@ class GitController:
             status = token[:2]
             path = token[3:] if token[2:3] == " " else token[2:]
             if status[0] in {"R", "C"} and index < len(tokens):
-                path = tokens[index]
+                # Keep the destination path and consume the source path.
                 index += 1
             normalized = path.replace("\\", "/")
             action = actions.get(normalized)

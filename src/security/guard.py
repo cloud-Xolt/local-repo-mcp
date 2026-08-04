@@ -83,10 +83,21 @@ def resolve_repo_path(repo_root: Path, user_path: str) -> tuple[Path, str]:
     return resolved, relative.as_posix() or "."
 
 
+def _reject_hardlinked_file(target: Path) -> None:
+    if not target.exists() or not target.is_file():
+        return
+    try:
+        if target.stat().st_nlink > 1:
+            raise PermissionError("hard-linked files are not allowed")
+    except OSError as exc:
+        raise PermissionError("unable to validate file link count") from exc
+
+
 def validate_read_path(repo_root: Path, user_path: str) -> tuple[Path, str]:
     target, relative = resolve_repo_path(repo_root, user_path)
     if relative != "." and is_read_denied(relative):
         raise PermissionError(f"path is blocked: {relative}")
+    _reject_hardlinked_file(target)
     return target, relative
 
 
@@ -94,6 +105,7 @@ def validate_write_path(repo_root: Path, user_path: str) -> tuple[Path, str]:
     target, relative = resolve_repo_path(repo_root, user_path)
     if relative == "." or is_write_denied(relative):
         raise PermissionError(f"write path is blocked: {relative}")
+    _reject_hardlinked_file(target)
     return target, relative
 
 
@@ -109,6 +121,11 @@ def list_files(base: Path, repo_root: Path, limit: int) -> tuple[list[str], bool
         for name in files:
             item = root_path / name
             if item.is_symlink():
+                continue
+            try:
+                if item.stat().st_nlink > 1:
+                    continue
+            except OSError:
                 continue
             relative = item.relative_to(repo_root).as_posix()
             if is_read_denied(relative):

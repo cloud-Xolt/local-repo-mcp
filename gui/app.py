@@ -12,11 +12,14 @@ from typing import Callable
 
 import customtkinter as ctk
 
+from gui import log_workspace, server_workspace
 from gui.config import AppConfig, load_config, save_config
+from gui.connection import run_connection_test as run_smoke_test
 from gui.dialogs import show_result_dialog
 from gui.i18n import tr
-from gui.process_manager import ProcessManager, format_uptime
-from gui.smoke_test import run_smoke_test
+from gui.processes import ProcessManager, format_uptime
+from mcp_app.runtime import launcher_command
+from mcp_app.version import VERSION
 from gui.theme import (
     BTN_HEIGHT,
     CARD_RADIUS,
@@ -33,11 +36,10 @@ from gui.theme import (
     INPUT_HEIGHT,
     SIDEBAR_WIDTH,
 )
-from gui.tunnel_manager import TunnelManager
+from gui.tunnel import TunnelManager
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "gui" / "assets"
-VERSION = "1.2.2"
 GITHUB_URL = "https://github.com/cloud-Xolt/local-repo-mcp"
 
 PAGE_SUBTITLES = {
@@ -94,6 +96,9 @@ class LocalRepoMCPApp(ctk.CTk):
             "about_security": False,
         }
         self.log_channel = "mcp"
+        self.log_view_mode = "readable"
+        self.log_events: list[dict] = []
+        self.log_refresh_job: str | None = None
 
         self._init_variables()
         self._build_shell()
@@ -114,17 +119,35 @@ class LocalRepoMCPApp(ctk.CTk):
         self.http_token_var = ctk.StringVar(value=cfg.http_auth_token)
         self.allowed_hosts_var = ctk.StringVar(value=cfg.http_allowed_hosts)
         self.allowed_origins_var = ctk.StringVar(value=cfg.http_allowed_origins)
+        self.http_public_url_var = ctk.StringVar(value=cfg.http_public_url)
+        self.http_tls_cert_var = ctk.StringVar(value=cfg.http_tls_certfile)
+        self.http_tls_key_var = ctk.StringVar(value=cfg.http_tls_keyfile)
+        self.http_tls_ca_var = ctk.StringVar(value=cfg.http_tls_client_ca)
+        self.http_client_cert_var = ctk.StringVar(value=cfg.http_client_certfile)
+        self.http_client_key_var = ctk.StringVar(value=cfg.http_client_keyfile)
+        self.http_tls_proxy_var = ctk.BooleanVar(value=cfg.http_tls_terminated_proxy)
+        self.http_proxy_ips_var = ctk.StringVar(value=cfg.http_proxy_trusted_ips)
+        self.http_request_kb_var = ctk.StringVar(value=str(cfg.http_max_request_bytes // 1000))
+        self.http_json_var = ctk.BooleanVar(value=cfg.http_json_response)
+        self.http_stateless_var = ctk.BooleanVar(value=cfg.http_stateless)
         self.max_file_var = ctk.StringVar(value=str(cfg.max_file_bytes // 1000))
         self.max_patch_var = ctk.StringVar(value=str(cfg.max_patch_bytes // 1000))
         self.max_search_var = ctk.StringVar(value=str(cfg.max_search_results))
         self.max_output_var = ctk.StringVar(value=str(cfg.max_output_bytes // 1000))
         self.test_timeout_var = ctk.StringVar(value=str(cfg.test_timeout_max))
         self.audit_var = ctk.StringVar(value=cfg.audit_log)
+        self.mcp_log_var = ctk.StringVar(value=cfg.mcp_log)
+        self.log_max_kb_var = ctk.StringVar(value=str(cfg.log_max_bytes // 1000))
+        self.log_backup_var = ctk.StringVar(value=str(cfg.log_backup_count))
         self.dirty_var = ctk.BooleanVar(value=cfg.allow_dirty_worktree)
         self.tunnel_path_var = ctk.StringVar(value=cfg.tunnel_client_path)
         self.tunnel_id_var = ctk.StringVar(value=cfg.tunnel_id)
         self.tunnel_profile_var = ctk.StringVar(value=cfg.tunnel_profile)
+        self.tunnel_profile_path_var = ctk.StringVar(value=cfg.tunnel_profile_path)
         self.api_key_var = ctk.StringVar(value=cfg.control_plane_api_key)
+        self.log_query_var = ctk.StringVar(value="")
+        self.log_level_var = ctk.StringVar(value="ALL")
+        self.log_auto_var = ctk.BooleanVar(value=True)
 
     def _build_shell(self) -> None:
         for child in self.winfo_children():
@@ -311,6 +334,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self.page_container.grid_rowconfigure(0, weight=1)
 
     def _show_page(self, page: str) -> None:
+        log_workspace.cancel(self)
         self.current_page = page
         for key, button in self.nav_buttons.items():
             active = key == page
@@ -329,7 +353,7 @@ class LocalRepoMCPApp(ctk.CTk):
             "home": self._build_home,
             "server": self._build_server,
             "chatgpt": self._build_chatgpt,
-            "logs": self._build_logs,
+            "logs": self._build_logs_center,
             "about": self._build_about,
         }[page]()
 
@@ -699,6 +723,91 @@ class LocalRepoMCPApp(ctk.CTk):
                     self.t("regenerate"),
                     self._generate_token,
                 ).pack(side="left", padx=4)
+                self._field(
+                    http_body,
+                    self.t("http_allowed_hosts"),
+                    self.allowed_hosts_var,
+                    row=3,
+                    column=0,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_allowed_origins"),
+                    self.allowed_origins_var,
+                    row=3,
+                    column=1,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_public_url"),
+                    self.http_public_url_var,
+                    row=4,
+                    columnspan=2,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_tls_cert"),
+                    self.http_tls_cert_var,
+                    row=5,
+                    column=0,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_tls_key"),
+                    self.http_tls_key_var,
+                    row=5,
+                    column=1,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_tls_ca"),
+                    self.http_tls_ca_var,
+                    row=6,
+                    column=0,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_proxy_ips"),
+                    self.http_proxy_ips_var,
+                    row=6,
+                    column=1,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_client_cert"),
+                    self.http_client_cert_var,
+                    row=7,
+                    column=0,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_client_key"),
+                    self.http_client_key_var,
+                    row=7,
+                    column=1,
+                )
+                self._field(
+                    http_body,
+                    self.t("http_request_kb"),
+                    self.http_request_kb_var,
+                    row=8,
+                    column=0,
+                )
+                http_flags = ctk.CTkFrame(http_body, fg_color="transparent")
+                http_flags.grid(row=8, column=1, sticky="ew", padx=(8, 0), pady=6)
+                for text, variable in (
+                    (self.t("http_tls_proxy"), self.http_tls_proxy_var),
+                    (self.t("http_json_response"), self.http_json_var),
+                    (self.t("http_stateless"), self.http_stateless_var),
+                ):
+                    ctk.CTkSwitch(
+                        http_flags,
+                        text=text,
+                        variable=variable,
+                        progress_color=COLORS["primary"],
+                        text_color=COLORS["text"],
+                        font=ctk.CTkFont(size=FONT_SMALL),
+                    ).pack(anchor="w", pady=3)
             next_row += 1
 
         _, advanced = self._collapsible(
@@ -715,12 +824,33 @@ class LocalRepoMCPApp(ctk.CTk):
             self._field(advanced, self.t("max_output"), self.max_output_var, row=1, column=1)
             self._field(advanced, self.t("test_timeout"), self.test_timeout_var, row=2, column=0)
             self._field(advanced, self.t("audit_log"), self.audit_var, row=2, column=1)
+            self._field(
+                advanced,
+                self.t("mcp_log"),
+                self.mcp_log_var,
+                row=3,
+                columnspan=2,
+            )
+            self._field(
+                advanced,
+                self.t("log_max_kb"),
+                self.log_max_kb_var,
+                row=4,
+                column=0,
+            )
+            self._field(
+                advanced,
+                self.t("log_backup_count"),
+                self.log_backup_var,
+                row=4,
+                column=1,
+            )
             warning = ctk.CTkFrame(
                 advanced,
                 fg_color=COLORS["warning_soft"],
                 corner_radius=10,
             )
-            warning.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            warning.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
             ctk.CTkSwitch(
                 warning,
                 text=self.t("dirty_worktree"),
@@ -758,98 +888,22 @@ class LocalRepoMCPApp(ctk.CTk):
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=FONT_SMALL),
         ).pack(side="left", padx=16, pady=13)
-        self._primary_button(action_bar, self.t("save"), self._save_action).pack(
-            side="right", padx=(6, 14), pady=9
-        )
-        self._secondary_button(action_bar, self.t("run_test"), self._run_smoke_test).pack(
-            side="right", padx=3, pady=9
-        )
-        if self.transport_var.get() == "streamable-http":
+        if self.transport_var.get() == "stdio":
+            self._primary_button(
+                action_bar,
+                self.t("connect"),
+                self._run_smoke_test,
+            ).pack(side="right", padx=(6, 14), pady=9)
+        else:
             self._primary_button(
                 action_bar,
                 self.t("stop_http") if self.processes.mcp.running else self.t("start_http"),
                 self._stop_http if self.processes.mcp.running else self._start_http,
                 danger=self.processes.mcp.running,
-            ).pack(side="right", padx=3, pady=9)
+            ).pack(side="right", padx=(6, 14), pady=9)
 
     def _build_server(self) -> None:
-        page = self._page()
-        running = self.processes.mcp.running
-        _, overview = self._card(
-            page,
-            self.t("service_overview"),
-            self.t("service_running_hint") if running else self.t("service_stopped_hint"),
-            row=0,
-            columnspan=2,
-        )
-        status_line = ctk.CTkFrame(overview, fg_color="transparent")
-        status_line.grid(row=0, column=0, sticky="ew")
-        status_line.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            status_line,
-            text="●",
-            text_color=COLORS["success"] if running else COLORS["subtle"],
-            font=ctk.CTkFont(size=16),
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            status_line,
-            text=self.t("service_running") if running else self.t("service_stopped"),
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", padx=(22, 0))
-        actions = ctk.CTkFrame(status_line, fg_color="transparent")
-        actions.grid(row=0, column=1, sticky="e")
-        self._secondary_button(actions, self.t("run_test"), self._run_smoke_test).pack(
-            side="left", padx=4
-        )
-        if self.transport_var.get() == "streamable-http":
-            self._primary_button(
-                actions,
-                self.t("stop_http") if running else self.t("start_http"),
-                self._stop_http if running else self._start_http,
-                danger=running,
-            ).pack(side="left", padx=4)
-
-        metrics = ctk.CTkFrame(overview, fg_color="transparent")
-        metrics.grid(row=1, column=0, sticky="ew", pady=(14, 0))
-        self._metric(metrics, self.t("status"), self.t("running") if running else self.t("stopped"), row=0, column=0)
-        self._metric(metrics, self.t("pid"), str(self.processes.mcp.pid or "—"), row=0, column=1)
-        self._metric(metrics, self.t("uptime"), format_uptime(self.processes.mcp.uptime), row=0, column=2)
-        self._metric(metrics, self.t("mode"), self.mode_var.get(), row=0, column=3)
-
-        _, check_body = self._collapsible(
-            page,
-            "server_check",
-            self.t("connection_details"),
-            self.t("connection_details_hint"),
-            row=1,
-        )
-        if check_body is not None:
-            box = self._code_box(
-                check_body,
-                json.dumps(self.last_test, ensure_ascii=False, indent=2)
-                if self.last_test
-                else self.t("never"),
-                height=180,
-            )
-            box.grid(row=0, column=0, columnspan=2, sticky="ew")
-
-        _, client_body = self._collapsible(
-            page,
-            "server_client",
-            self.t("client_config"),
-            self.t("client_config_hint"),
-            row=2,
-        )
-        if client_body is not None:
-            config_text = self._client_config_text()
-            box = self._code_box(client_body, config_text, height=260)
-            box.grid(row=0, column=0, columnspan=2, sticky="ew")
-            self._secondary_button(
-                client_body,
-                self.t("copy"),
-                lambda: self._copy_text(config_text),
-            ).grid(row=1, column=1, sticky="e", pady=(10, 0))
+        server_workspace.build(self)
 
     def _build_chatgpt(self) -> None:
         page = self._page()
@@ -871,6 +925,13 @@ class LocalRepoMCPApp(ctk.CTk):
             column=1,
             show="" if self.api_key_visible else "•",
         )
+        self._field(
+            setup,
+            self.t("profile_path"),
+            self.tunnel_profile_path_var,
+            row=2,
+            columnspan=2,
+        )
         setup.grid_columnconfigure(
             0,
             weight=FORM_PRIMARY_WEIGHT,
@@ -885,7 +946,7 @@ class LocalRepoMCPApp(ctk.CTk):
         )
 
         controls = ctk.CTkFrame(setup, fg_color="transparent")
-        controls.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        controls.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         tunnel_actions = (
             self._secondary_button(
                 controls,
@@ -959,44 +1020,8 @@ class LocalRepoMCPApp(ctk.CTk):
                     font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
                 ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
-    def _build_logs(self) -> None:
-        page = self._page()
-        _, body = self._card(
-            page,
-            self.t("logs"),
-            self.t("logs_subtitle"),
-            row=0,
-            columnspan=2,
-        )
-        labels = [self.t("log_mcp"), self.t("log_tunnel"), self.t("log_audit")]
-        mapping = dict(zip(labels, ("mcp", "tunnel", "audit")))
-        reverse = {value: key for key, value in mapping.items()}
-        tabs = ctk.CTkSegmentedButton(
-            body,
-            values=labels,
-            height=44,
-            selected_color=COLORS["accent_soft"],
-            selected_hover_color=COLORS["surface_hover"],
-            unselected_color=COLORS["surface_alt"],
-            unselected_hover_color=COLORS["surface_hover"],
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=FONT_BODY),
-            command=lambda value: self._change_log_channel(mapping[value]),
-        )
-        tabs.set(reverse[self.log_channel])
-        tabs.grid(row=0, column=0, sticky="w")
-
-        toolbar = ctk.CTkFrame(body, fg_color="transparent")
-        toolbar.grid(row=0, column=1, sticky="e")
-        self._secondary_button(toolbar, self.t("refresh"), lambda: self._show_page("logs")).pack(
-            side="left", padx=4
-        )
-        log_text = self._current_log_text()
-        self._secondary_button(toolbar, self.t("copy"), lambda: self._copy_text(log_text)).pack(
-            side="left", padx=4
-        )
-        box = self._code_box(body, log_text or self.t("empty_log"), height=500)
-        box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+    def _build_logs_center(self) -> None:
+        log_workspace.build(self)
 
     def _build_about(self) -> None:
         page = self._page()
@@ -1065,7 +1090,9 @@ class LocalRepoMCPApp(ctk.CTk):
                     font=ctk.CTkFont(size=FONT_BODY),
                 ).grid(row=index, column=0, columnspan=2, sticky="w", pady=4)
 
-    def _code_box(self, parent, text: str, *, height: int):
+    def _code_box(
+        self, parent, text: str, *, height: int, tail: bool = False
+    ):
         box = ctk.CTkTextbox(
             parent,
             height=height,
@@ -1079,6 +1106,8 @@ class LocalRepoMCPApp(ctk.CTk):
         )
         box.insert("1.0", text)
         box.configure(state="disabled")
+        if tail:
+            box.see("end")
         return box
 
     def _collect_config(self, *, quiet: bool = False) -> AppConfig | None:
@@ -1096,16 +1125,31 @@ class LocalRepoMCPApp(ctk.CTk):
                 http_auth_token=self.http_token_var.get().strip(),
                 http_allowed_hosts=self.allowed_hosts_var.get().strip(),
                 http_allowed_origins=self.allowed_origins_var.get().strip(),
+                http_public_url=self.http_public_url_var.get().strip(),
+                http_tls_certfile=self.http_tls_cert_var.get().strip(),
+                http_tls_keyfile=self.http_tls_key_var.get().strip(),
+                http_tls_client_ca=self.http_tls_ca_var.get().strip(),
+                http_client_certfile=self.http_client_cert_var.get().strip(),
+                http_client_keyfile=self.http_client_key_var.get().strip(),
+                http_tls_terminated_proxy=self.http_tls_proxy_var.get(),
+                http_proxy_trusted_ips=self.http_proxy_ips_var.get().strip(),
+                http_max_request_bytes=int(self.http_request_kb_var.get()) * 1000,
+                http_json_response=self.http_json_var.get(),
+                http_stateless=self.http_stateless_var.get(),
                 max_file_bytes=int(self.max_file_var.get()) * 1000,
                 max_patch_bytes=int(self.max_patch_var.get()) * 1000,
                 max_search_results=int(self.max_search_var.get()),
                 max_output_bytes=int(self.max_output_var.get()) * 1000,
                 allow_dirty_worktree=self.dirty_var.get(),
                 audit_log=self.audit_var.get().strip(),
+                mcp_log=self.mcp_log_var.get().strip(),
+                log_max_bytes=int(self.log_max_kb_var.get()) * 1000,
+                log_backup_count=int(self.log_backup_var.get()),
                 test_timeout_max=int(self.test_timeout_var.get()),
                 tunnel_client_path=self.tunnel_path_var.get().strip() or "tunnel-client",
                 tunnel_id=self.tunnel_id_var.get().strip(),
                 tunnel_profile=self.tunnel_profile_var.get().strip() or "local-repo",
+                tunnel_profile_path=self.tunnel_profile_path_var.get().strip(),
                 control_plane_api_key=self.api_key_var.get().strip(),
             )
         except ValueError:
@@ -1137,15 +1181,6 @@ class LocalRepoMCPApp(ctk.CTk):
         self._status(self.t("saved"), "success")
         return cfg
 
-    def _save_action(self) -> None:
-        cfg = self._save()
-        if cfg and self.processes.mcp.running and cfg.transport == "streamable-http":
-            self._background(
-                lambda: self.processes.restart_http(cfg),
-                self.t("running"),
-                rebuild=True,
-            )
-
     def _start_http(self) -> None:
         cfg = self._save()
         if cfg is not None:
@@ -1172,10 +1207,15 @@ class LocalRepoMCPApp(ctk.CTk):
 
         def success(value):
             self.last_test = value
-            self._status(self.t("passed"), "success")
+            self._status(self.t("connected"), "success")
             self._show_page("server")
 
-        self._background(lambda: run_smoke_test(cfg), on_success=success)
+        self._background(
+            lambda: run_smoke_test(
+                cfg, log_callback=self.processes.mcp.append_log
+            ),
+            on_success=success,
+        )
 
     def _detect_tunnel(self) -> None:
         cfg = self._collect_config()
@@ -1352,42 +1392,19 @@ class LocalRepoMCPApp(ctk.CTk):
         env = cfg.mcp_env()
         env["MCP_TRANSPORT"] = "stdio"
         env.pop("HTTP_AUTH_TOKEN", None)
+        command = launcher_command(sys.executable)
         return json.dumps(
             {
                 "mcpServers": {
                     "local-repo": {
-                        "command": sys.executable,
-                        "args": [str(ROOT / "server.py")],
+                        "command": command[0],
+                        "args": command[1:],
                         "env": env,
                     }
                 }
             },
             indent=2,
         )
-
-    def _change_log_channel(self, channel: str) -> None:
-        self.log_channel = channel
-        self._show_page("logs")
-
-    def _current_log_text(self) -> str:
-        if self.log_channel == "mcp":
-            return "\n".join(self.processes.mcp.snapshot())
-        if self.log_channel == "tunnel":
-            return "\n".join(self.processes.tunnel.snapshot())
-        return self._tail_audit()
-
-    def _tail_audit(self) -> str:
-        raw = self.audit_var.get().strip()
-        if not raw:
-            return ""
-        try:
-            lines = Path(raw).read_text(
-                encoding="utf-8",
-                errors="replace",
-            ).splitlines()
-            return "\n".join(lines[-500:])
-        except OSError:
-            return ""
 
     def _copy_text(self, text: str) -> None:
         self.clipboard_clear()
@@ -1421,10 +1438,3 @@ class LocalRepoMCPApp(ctk.CTk):
         self.processes.stop_all()
         self.destroy()
 
-
-def main() -> None:
-    LocalRepoMCPApp().mainloop()
-
-
-if __name__ == "__main__":
-    main()

@@ -1,11 +1,13 @@
 [Unit]
 Description=Local Repo MCP Streamable HTTP Server
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=repo-mcp
 Group=repo-mcp
+UMask=0077
 WorkingDirectory=/opt/local-repo-mcp
 EnvironmentFile=/etc/local-repo-mcp/mcp.env
 ExecStart=/opt/local-repo-mcp/.venv/bin/python /opt/local-repo-mcp/server.py
@@ -13,8 +15,22 @@ Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
 ReadWritePaths=/opt/repos/target-repo /var/log/local-repo-mcp
 
 [Install]

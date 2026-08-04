@@ -1,9 +1,12 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
-if exist ".venv\Scripts\python.exe" (
-  ".venv\Scripts\python.exe" run_gui.py
-) else (
-  python run_gui.py
+python bootstrap.py
+if errorlevel 1 (
+  echo ERROR: Failed to prepare the Local Repo MCP environment
+  pause
+  exit /b 1
 )
+".venv\Scripts\python.exe" run_gui.py
+if errorlevel 1 pause
 endlocal
