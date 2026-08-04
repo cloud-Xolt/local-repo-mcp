@@ -18,10 +18,12 @@ class AuditLogger:
         *,
         max_bytes: int = 5_000_000,
         backup_count: int = 3,
+        strict: bool = False,
     ) -> None:
         self.path = Path(path).expanduser().resolve() if path.strip() else None
         self.max_bytes = max(64_000, int(max_bytes))
         self.backup_count = max(1, min(int(backup_count), 20))
+        self.strict = bool(strict)
         self._lock = threading.Lock()
         self._writer = JsonlEventWriter(
             self.path,
@@ -42,4 +44,7 @@ class AuditLogger:
         try:
             self._writer.write(record)
         except (OSError, TimeoutError) as exc:
-            print(f"Local Repo MCP log write failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            message = f"Local Repo MCP log write failed: {type(exc).__name__}: {exc}"
+            if self.strict:
+                raise RuntimeError(message) from exc
+            print(message, file=sys.stderr)

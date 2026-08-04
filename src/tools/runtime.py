@@ -84,6 +84,14 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
         raise RuntimeError("REPO_ROOT is required")
     repo_root = require_worktree_root(repo_text).root
     assert repo_root is not None
+    mode = _parse_mode(os.environ.get("MCP_MODE", "read"))
+    audit_required = _parse_bool(
+        os.environ.get("AUDIT_REQUIRED", ""),
+        default=mode in {"write", "test"},
+    )
+    audit_path = os.environ.get("AUDIT_LOG", "").strip()
+    if audit_required and not audit_path:
+        raise RuntimeError("AUDIT_LOG is required in write and test modes")
 
     max_file = _positive_int("MAX_FILE_BYTES", 200_000, 20_000_000)
     max_patch = _positive_int("MAX_PATCH_BYTES", 200_000, 5_000_000)
@@ -93,9 +101,10 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
     log_max = _positive_int("LOG_MAX_BYTES", 5_000_000, 100_000_000)
     log_backups = _positive_int("LOG_BACKUP_COUNT", 3, 20)
     audit = AuditLogger(
-        os.environ.get("AUDIT_LOG", "").strip(),
+        audit_path,
         max_bytes=log_max,
         backup_count=log_backups,
+        strict=audit_required,
     )
     runtime_log = AuditLogger(
         os.environ.get("MCP_LOG", "").strip(),
@@ -109,7 +118,7 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
     context = RuntimeContext(
         mcp=mcp,
         repo_root=repo_root,
-        mode=_parse_mode(os.environ.get("MCP_MODE", "read")),
+        mode=mode,
         transport=os.environ.get("MCP_TRANSPORT", "stdio").strip().lower(),
         server_instance_id=secrets.token_hex(8),
         max_file_bytes=max_file,

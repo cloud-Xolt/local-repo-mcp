@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Mapping
 
 from gui.config import AppConfig
+from security.tokens import require_strong_http_token
 
 _EMPTY_REMOVES = {"HTTP_AUTH_TOKEN", "AUDIT_LOG", "MCP_LOG"}
 
@@ -24,12 +25,10 @@ def _config_values(config: AppConfig) -> dict[str, str]:
 
 def _validate_effective(values: Mapping[str, str]) -> None:
     transport = values.get("MCP_TRANSPORT", "stdio").strip().lower()
-    if transport in {"streamable-http", "http"}:
-        token = values.get("HTTP_AUTH_TOKEN", "").strip()
-        if len(token) < 32:
-            raise ValueError(
-                "Streamable HTTP requires a Bearer token of at least 32 characters"
-            )
+    if transport not in {"stdio", "streamable-http"}:
+        raise ValueError("MCP_TRANSPORT must be stdio or streamable-http")
+    if transport == "streamable-http":
+        require_strong_http_token(values.get("HTTP_AUTH_TOKEN", ""))
 
 
 def merge_environment(

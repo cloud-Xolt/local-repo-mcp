@@ -7,6 +7,8 @@ from typing import Callable
 
 from starlette.responses import JSONResponse
 
+from security.tokens import require_strong_http_token
+
 
 @dataclass(frozen=True)
 class HttpSecuritySettings:
@@ -24,10 +26,10 @@ class HttpSecuritySettings:
         proxy_mode: bool,
         trusted_values: list[str],
     ) -> "HttpSecuritySettings":
-        if len(token) < 32:
-            raise RuntimeError(
-                "HTTP_AUTH_TOKEN must contain at least 32 characters"
-            )
+        try:
+            token = require_strong_http_token(token)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
         networks: list[ipaddress._BaseNetwork] = []
         for value in trusted_values:
             try:

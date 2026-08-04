@@ -2,18 +2,26 @@ from __future__ import annotations
 
 import os
 import shlex
+import signal
 import subprocess
 import sys
+import tempfile
+import time
+import time
 from pathlib import Path
 
+
+def _gradle_command() -> list[str]:
+    return ["gradlew.bat" if os.name == "nt" else "./gradlew", "test"]
+
+
 TEST_COMMANDS = {
-    "gui_smoke": [sys.executable, "run_gui.py", "--smoke"],
     "python_pytest": [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
     "go_test": ["go", "test", "./..."],
     "node_test": ["npm", "test", "--"],
     "node_lint": ["npm", "run", "lint", "--"],
     "maven_test": ["mvn", "test"],
-    "gradle_test": ["./gradlew", "test"],
+    "gradle_test": _gradle_command(),
 }
 
 _ALLOWED_ENV = {
@@ -24,7 +32,6 @@ _ALLOWED_ENV = {
 
 
 def _env_icase_lookup(env: dict[str, str], target: str) -> str:
-    """Case-insensitive lookup for Windows environment variables."""
     target_upper = target.upper()
     for key, value in env.items():
         if key.upper() == target_upper:
@@ -34,11 +41,7 @@ def _env_icase_lookup(env: dict[str, str], target: str) -> str:
 
 def _expanded_value(value: str) -> str | None:
     expanded = os.path.expandvars(value)
-    # Reject unresolved Windows-style placeholders on every host. This also
-    # makes Linux/macOS CI able to regression-test Windows environment input.
-    if "%" in expanded:
-        return None
-    return expanded
+    return None if "%" in expanded else expanded
 
 
 def _valid_absolute_path(value: str | None) -> Path | None:
@@ -64,7 +67,6 @@ def _safe_temp_root(repo_root: Path) -> Path:
     if local_appdata is not None:
         candidates.append(local_appdata / "Temp" / "local-repo-mcp-tests")
     candidates.append(repo_root.resolve().parent / ".local-repo-mcp-tests")
-
     for candidate in candidates:
         try:
             candidate.mkdir(parents=True, exist_ok=True)
@@ -85,18 +87,15 @@ def _safe_environment(repo_root: Path) -> dict[str, str]:
         expanded = _expanded_value(value)
         if expanded is not None:
             env[key] = expanded
-
     temp_root = _safe_temp_root(repo_root)
     env["TEMP"] = str(temp_root)
     env["TMP"] = str(temp_root)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONPYCACHEPREFIX"] = str(temp_root / "pycache")
     env.pop("PYTEST_ADDOPTS", None)
-
     if os.name == "nt":
         for key, suffix in (
-            ("HOME", "home"),
-            ("USERPROFILE", "home"),
+            ("HOME", "home"), ("USERPROFILE", "home"),
             ("APPDATA", "home/AppData/Roaming"),
             ("LOCALAPPDATA", "home/AppData/Local"),
         ):
@@ -104,26 +103,53 @@ def _safe_environment(repo_root: Path) -> dict[str, str]:
                 target = temp_root / Path(suffix)
                 target.mkdir(parents=True, exist_ok=True)
                 env[key] = str(target)
-
-        system_drive_value = _expanded_value(
-            _env_icase_lookup(env, "SystemDrive")
-        )
-        if not system_drive_value:
-            system_root = _valid_absolute_path(
-                _env_icase_lookup(env, "SystemRoot")
-            )
+        if not _expanded_value(_env_icase_lookup(env, "SystemDrive")):
+            system_root = _valid_absolute_path(_env_icase_lookup(env, "SystemRoot"))
             drive = system_root.drive if system_root is not None else repo_root.drive
             if drive:
                 env["SystemDrive"] = drive
-
     return env
 
 
-def _truncate(value: str, max_bytes: int) -> tuple[str, bool]:
-    raw = value.encode("utf-8", errors="replace")
-    if len(raw) <= max_bytes:
-        return value, False
-    return raw[:max_bytes].decode("utf-8", errors="replace"), True
+def _terminate_tree(process: subprocess.Popen, timeout: float = 2.0) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        result = subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+            shell=False,
+        )
+        if result.returncode != 0 and process.poll() is None:
+            process.kill()
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        process.kill()
+
+
+def _temp_output_path(root: Path, prefix: str) -> Path:
+    descriptor, raw_path = tempfile.mkstemp(prefix=prefix, dir=root)
+    os.close(descriptor)
+    return Path(raw_path)
+
+
+def _read_bounded(path: Path, max_bytes: int) -> tuple[str, bool]:
+    size = path.stat().st_size if path.exists() else 0
+    with path.open("rb") as handle:
+        raw = handle.read(max_bytes)
+    return raw.decode("utf-8", errors="replace"), size > max_bytes
 
 
 class RepoTestRunner:
@@ -134,32 +160,67 @@ class RepoTestRunner:
 
     def run(self, command_key: str, timeout_seconds: int) -> dict:
         if command_key not in TEST_COMMANDS:
-            raise PermissionError(f"test command is not allowed: {command_key}")
+            allowed = ", ".join(sorted(TEST_COMMANDS))
+            raise PermissionError(
+                f"test command is not allowed: {command_key}; allowed={allowed}"
+            )
         timeout = min(max(int(timeout_seconds), 1), self.max_timeout)
         command = TEST_COMMANDS[command_key]
+        temp_root = _safe_temp_root(self.repo_root)
+        stdout_path = _temp_output_path(temp_root, "stdout-")
+        stderr_path = _temp_output_path(temp_root, "stderr-")
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         try:
-            result = subprocess.run(
-                command,
-                cwd=self.repo_root,
-                shell=False,
-                timeout=timeout,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=_safe_environment(self.repo_root),
-                check=False,
+            with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+                try:
+                    process = subprocess.Popen(
+                        command,
+                        cwd=self.repo_root,
+                        shell=False,
+                        stdin=subprocess.DEVNULL,
+                        stdout=stdout,
+                        stderr=stderr,
+                        env=_safe_environment(self.repo_root),
+                        creationflags=creationflags,
+                        start_new_session=os.name != "nt",
+                    )
+                except FileNotFoundError as exc:
+                    raise FileNotFoundError(
+                        f"required test executable was not found: {command[0]}"
+                    ) from exc
+                deadline = time.monotonic() + timeout
+                capture_limit = max(self.max_output_bytes * 4, 1_000_000)
+                while process.poll() is None:
+                    if time.monotonic() >= deadline:
+                        _terminate_tree(process)
+                        raise TimeoutError(
+                            f"test command exceeded {timeout} seconds and its process tree was terminated"
+                        )
+                    total_size = stdout_path.stat().st_size + stderr_path.stat().st_size
+                    if total_size > capture_limit:
+                        _terminate_tree(process)
+                        raise PermissionError(
+                            f"test output exceeded capture limit: {total_size} > {capture_limit}"
+                        )
+                    time.sleep(0.05)
+                returncode = int(process.returncode or 0)
+            stdout_text, stdout_truncated = _read_bounded(
+                stdout_path, self.max_output_bytes
             )
-            stdout, stdout_truncated = _truncate(result.stdout, self.max_output_bytes)
-            stderr, stderr_truncated = _truncate(result.stderr, self.max_output_bytes)
+            stderr_text, stderr_truncated = _read_bounded(
+                stderr_path, self.max_output_bytes
+            )
             return {
                 "command": " ".join(shlex.quote(part) for part in command),
-                "returncode": result.returncode,
-                "stdout": stdout,
-                "stderr": stderr,
+                "returncode": returncode,
+                "stdout": stdout_text,
+                "stderr": stderr_text,
                 "stdout_truncated": stdout_truncated,
                 "stderr_truncated": stderr_truncated,
                 "timeout_seconds": timeout,
             }
-        except subprocess.TimeoutExpired as exc:
-            raise TimeoutError(f"test command exceeded {timeout} seconds") from exc
+        finally:
+            stdout_path.unlink(missing_ok=True)
+            stderr_path.unlink(missing_ok=True)

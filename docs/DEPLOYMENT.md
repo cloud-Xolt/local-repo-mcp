@@ -82,3 +82,12 @@ LOG_BACKUP_COUNT=3
 ```
 
 Each JSONL record is written under a cross-process file lock. Files rotate when they reach `LOG_MAX_BYTES`; numbered backups are retained up to `LOG_BACKUP_COUNT`. The GUI reads only a bounded tail, so opening the log center does not load the complete file. Ensure the log directory is included in the service account's writable paths. Process and Tunnel output is redacted for common Bearer tokens and API-key formats before it reaches the GUI.
+
+## Readiness and release inputs
+
+For native TLS, the GUI probes the local listener while using the hostname from `HTTP_PUBLIC_URL` for TLS SNI and the HTTP Host header. This avoids certificate mismatches on wildcard bindings without requiring public-DNS hairpin routing. Reverse-proxy mode continues to probe the public HTTPS endpoint.
+
+Replace `HTTP_AUTH_TOKEN=CHANGE_ME` with a generated random token; placeholder and low-variation values are rejected. Write and test deployments must configure `AUDIT_LOG` and should keep `AUDIT_REQUIRED=true`.
+
+Source bootstrap installs the exact top-level versions in `requirements.lock`. Wheel validation installs the built artifact outside the source checkout and runs the packaged GUI smoke entry.
+

@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 REQUIREMENTS = ROOT / "requirements.txt"
+LOCKFILE = ROOT / "requirements.lock"
 MARKER = VENV / ".requirements.sha256"
 
 
@@ -17,8 +18,12 @@ def _venv_python() -> Path:
     return VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def _dependency_source() -> Path:
+    return LOCKFILE if LOCKFILE.is_file() else REQUIREMENTS
+
+
 def _requirements_hash() -> str:
-    return hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
+    return hashlib.sha256(_dependency_source().read_bytes()).hexdigest()
 
 
 def _write_atomic(path: Path, content: str) -> None:
@@ -43,7 +48,7 @@ def main() -> None:
     current = MARKER.read_text(encoding="utf-8").strip() if MARKER.is_file() else ""
     if current != expected:
         subprocess.run(
-            [str(_venv_python()), "-m", "pip", "install", "-r", str(REQUIREMENTS)],
+            [str(_venv_python()), "-m", "pip", "install", "-r", str(_dependency_source())],
             cwd=ROOT,
             check=True,
         )

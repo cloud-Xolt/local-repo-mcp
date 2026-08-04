@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from gui.config_codec import coerce_dataclass, protect_secret, unprotect_secret
 from gui.config_io import read_json_object
 from repo.worktree import inspect_worktree
+from security.tokens import http_token_problem
 
 APP_NAME = "local-repo-mcp"
 
@@ -178,6 +179,8 @@ class AppConfig:
         ):
             if not isinstance(value, int) or not low <= value <= high:
                 errors.append(key)
+        if self.mcp_mode in {"write", "test"} and not self.audit_log.strip():
+            errors.append("audit_log_required")
 
         if self.transport == "streamable-http":
             if not 1 <= int(self.http_port) <= 65535:
@@ -192,7 +195,7 @@ class AppConfig:
                 errors.append("http_nonlocal_hosts_required")
             if not self.http_auth_token:
                 errors.append("http_token_required")
-            elif len(self.http_auth_token.strip()) < 32:
+            elif http_token_problem(self.http_auth_token) is not None:
                 errors.append("http_token_weak")
             if not 1024 <= self.http_max_request_bytes <= 5_000_000:
                 errors.append("http_request_size_invalid")
@@ -254,6 +257,7 @@ class AppConfig:
             "MAX_SEARCH_RESULTS": str(self.max_search_results),
             "MAX_OUTPUT_BYTES": str(self.max_output_bytes),
             "ALLOW_DIRTY_WORKTREE": str(self.allow_dirty_worktree).lower(),
+            "AUDIT_REQUIRED": str(self.mcp_mode in {"write", "test"}).lower(),
             "AUDIT_LOG": self.audit_log.strip(),
             "MCP_LOG": self.mcp_log.strip(),
             "LOG_MAX_BYTES": str(self.log_max_bytes),

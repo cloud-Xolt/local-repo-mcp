@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Callable
@@ -47,11 +48,14 @@ class GitController:
 
     def _check_no_interrupted_operation(self) -> None:
         """Reject operations when a rebase, merge, or similar is in progress."""
-        git_dir = self.repo_root / ".git"
-        if not git_dir.is_dir():
-            git_dir = self.repo_root / ".git"
         for marker in self._INTERRUPTED_GIT_DIRS:
-            if (git_dir / marker).exists():
+            result = self.runner(["rev-parse", "--git-path", marker])
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+            path = Path(result.stdout.strip())
+            if not path.is_absolute():
+                path = self.repo_root / path
+            if path.exists():
                 raise PermissionError(
                     f"repository has an in-progress operation ({marker}), "
                     "please complete or abort it first"
@@ -79,7 +83,7 @@ class GitController:
         }
 
     def _diff_records(self, staged: bool) -> list[ChangeRecord]:
-        args = ["diff"]
+        args = ["diff", "--no-ext-diff", "--no-textconv"]
         if staged:
             args.append("--cached")
         args.extend(["--name-status", "-z", "-M", "-C"])
@@ -121,6 +125,33 @@ class GitController:
             "diff": diff,
             "hidden_files": hidden,
             "truncated": truncated,
+            "branch": self.current_branch(),
+        }
+
+    def diff_for_paths(
+        self,
+        paths: list[str],
+        max_bytes: int | None = None,
+    ) -> dict:
+        selected = sorted(set(paths))
+        effective_max = min(
+            max(max_bytes if max_bytes is not None else self.max_output_bytes, 1),
+            self.max_output_bytes,
+        )
+        result = self.runner([
+            "diff", "--no-ext-diff", "--no-textconv", "--", *selected
+        ])
+        full_diff = self._require_ok(result, "git diff failed")
+        encoded = full_diff.encode("utf-8")
+        truncated = len(encoded) > effective_max
+        visible = (
+            encoded[:effective_max].decode("utf-8", errors="replace")
+            if truncated else full_diff
+        )
+        return {
+            "diff": visible,
+            "truncated": truncated,
+            "full_hash": hashlib.sha256(encoded).hexdigest()[:16],
             "branch": self.current_branch(),
         }
 

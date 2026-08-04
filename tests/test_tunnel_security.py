@@ -1,3 +1,4 @@
+import secrets
 import sys
 
 import pytest
@@ -21,7 +22,7 @@ def test_http_start_uses_launcher(monkeypatch) -> None:
     monkeypatch.setattr(ManagedProcess, "start", fake_start)
     monkeypatch.setattr(ProcessManager, "_wait_http_ready", lambda self, config: None)
     pm = ProcessManager()
-    pm.start_http(AppConfig(repo_root=".", transport="streamable-http", http_auth_token="x" * 32))
+    pm.start_http(AppConfig(repo_root=".", transport="streamable-http", http_auth_token=secrets.token_urlsafe(32)))
     assert any("launch_mcp.py" in part for part in captured["cmd"])
 
 
