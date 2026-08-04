@@ -219,7 +219,7 @@ def main() -> None:
     try:
         if transport == "stdio":
             mcp.run()
-        elif transport in {"streamable-http", "http"}:
+        elif transport == "streamable-http":
             _run_http()
         else:
             raise RuntimeError(

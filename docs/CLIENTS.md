@@ -8,13 +8,7 @@ Any compatible MCP client, coding agent, IDE, desktop application, or automation
 
 ## Build a local project with ChatGPT
 
-Local Repo MCP requires the selected directory to be a Git working tree. To start a new project, create an empty directory and initialize Git:
-
-```bash
-mkdir my-project
-cd my-project
-git init
-```
+Local Repo MCP requires the selected directory to be a Git working tree. To start a new project, create an empty directory, select it in the GUI, and explicitly approve the Git initialization prompt.
 
 Then:
 
@@ -102,6 +96,6 @@ Every client is subject to the same:
 
 Manual `git init` is optional. When a user selects a plain folder, the GUI checks it immediately and asks for explicit confirmation before initializing it. The same check runs again before Connect or Start when the path was entered manually.
 
-Declining the prompt leaves the folder unchanged. Initialization creates only local `.git` metadata; Local Repo MCP does not create a commit, configure a remote, or publish the project. A child folder already inside an existing Git working tree is accepted without creating a nested repository.
+Declining the prompt leaves the folder unchanged. Initialization creates only local `.git` metadata; Local Repo MCP does not create a commit, configure a remote, or publish the project. A child folder already inside an existing Git working tree cannot be used as an independent security boundary; the GUI asks to switch to the actual working-tree root.
 
 Git itself must still be installed and available on `PATH`, because repository status, diff, patch validation, and mutation locking depend on Git.

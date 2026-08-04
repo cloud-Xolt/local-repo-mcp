@@ -49,6 +49,7 @@ def _search_with_ripgrep(
         text=True,
         encoding="utf-8",
         errors="replace",
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         shell=False,

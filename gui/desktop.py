@@ -240,28 +240,7 @@ class LocalRepoMCPApp(BaseApplication):
     def _collect_config(self, *, quiet: bool = False):
         if not quiet and not self._ensure_git_repository(prompt=True):
             return None
-        config = BaseApplication._collect_config(self, quiet=quiet)
-        if config is None:
-            return None
-        check = inspect_worktree(config.repo_root)
-        if not check.is_root:
-            if not quiet:
-                messagebox.showerror(
-                    self.t("error"),
-                    self.t("repo_not_git_root"),
-                )
-            return None
-        if (
-            config.transport == "streamable-http"
-            and len(config.http_auth_token.strip()) < 32
-        ):
-            if not quiet:
-                messagebox.showerror(
-                    self.t("error"),
-                    self.t("http_token_weak"),
-                )
-            return None
-        return config
+        return BaseApplication._collect_config(self, quiet=quiet)
 
     def _browse_repo(self) -> None:
         previous = self.repo_var.get().strip()

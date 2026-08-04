@@ -113,7 +113,7 @@ Test 模式会以当前操作系统用户权限执行仓库代码。该模式不
 
 Local Repo MCP 可以支持 ChatGPT 在所选权限模式下构建和维护本地 Git 项目，但并不只面向 ChatGPT。其他兼容 MCP 的编码 Agent、IDE、桌面客户端和自动化平台，也可以通过 STDIO 或 Streamable HTTP 接入，并获得相同的工具和安全控制。
 
-新建本地项目时，先在空目录中执行 `git init`，再在 GUI 中选择该目录并使用 `write` 或 `test` 模式。详细说明见[客户端兼容性与本地项目构建流程](docs/CLIENTS.zh-CN.md)。
+新建本地项目时，在 GUI 中选择空目录，明确确认 Git 初始化后，再使用 `write` 或 `test` 模式。详细说明见[客户端兼容性与本地项目构建流程](docs/CLIENTS.zh-CN.md)。
 
 
 当前 GUI 行为：选择普通目录后会立即检查 Git 状态，并弹出明确确认框。确认后才执行 `git init`；取消则目录保持不变。程序不会静默初始化，也不会创建 Commit 或远程仓库。若所选目录位于父级 Git 工作区内，不能把该子目录作为独立安全边界；GUI 会提示切换到实际的 Git 工作区根目录。

@@ -36,6 +36,27 @@ class GitController:
             else None
         )
 
+    _INTERRUPTED_GIT_DIRS = (
+        "rebase-merge",
+        "rebase-apply",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "BISECT_LOG",
+        "REVERT_HEAD",
+    )
+
+    def _check_no_interrupted_operation(self) -> None:
+        """Reject operations when a rebase, merge, or similar is in progress."""
+        git_dir = self.repo_root / ".git"
+        if not git_dir.is_dir():
+            git_dir = self.repo_root / ".git"
+        for marker in self._INTERRUPTED_GIT_DIRS:
+            if (git_dir / marker).exists():
+                raise PermissionError(
+                    f"repository has an in-progress operation ({marker}), "
+                    "please complete or abort it first"
+                )
+
     def is_worktree_clean(self) -> bool:
         result = self.runner(["status", "--porcelain"])
         return not self._require_ok(result, "git status failed").strip()
@@ -69,7 +90,9 @@ class GitController:
 
     def diff_filtered(self, staged: bool = False, max_bytes: int | None = None) -> dict:
         effective_max = min(
-            max(max_bytes or self.max_output_bytes, 1),
+            max(
+                max_bytes if max_bytes is not None else self.max_output_bytes, 1
+            ),
             self.max_output_bytes,
         )
         records = self._diff_records(staged)
@@ -93,7 +116,7 @@ class GitController:
         encoded = diff.encode("utf-8")
         truncated = len(encoded) > effective_max
         if truncated:
-            diff = encoded[:effective_max].decode("utf-8", errors="ignore")
+            diff = encoded[:effective_max].decode("utf-8", errors="replace")
         return {
             "diff": diff,
             "hidden_files": hidden,
@@ -139,6 +162,7 @@ class GitController:
         return targets
 
     def apply_patch_check(self, patch: str) -> None:
+        self._check_no_interrupted_operation()
         self._require_ok(
             self.runner(
                 [

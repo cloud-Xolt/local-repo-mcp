@@ -35,6 +35,7 @@ STATUS = {
     "denied": ("拒绝", "Denied", "⛔"),
 }
 _PROCESS_TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(.*)$")
+_EXIT_CODE = re.compile(r"exited with code\s+(-?\d+)", re.IGNORECASE)
 
 
 def read_tail_lines(path_text: str, *, max_lines: int = 1000, max_bytes: int = 1_000_000) -> list[str]:
@@ -112,7 +113,12 @@ def parse_process_lines(lines: Iterable[str], source: str) -> list[dict[str, Any
                 pass
         lowered = message.lower()
         status = "success"
-        if "failed" in lowered or "error" in lowered or "exited with code 1" in lowered:
+        exit_match = _EXIT_CODE.search(message)
+        if (
+            "failed" in lowered
+            or "error" in lowered
+            or (exit_match is not None and int(exit_match.group(1)) != 0)
+        ):
             status = "failed"
         elif "warning" in lowered:
             status = "warning"
@@ -191,7 +197,7 @@ def event_row(event: dict[str, Any], language: str) -> str:
     status = str(event.get("status", "success")).lower()
     label = STATUS.get(status, (status, status, "•"))
     status_text = label[0] if language == "zh" else label[1]
-    source = str(event.get("source", "mcp")).upper()[:9]
+    source = str(event.get("source", "mcp")).upper()[:6]
     target = str(event.get("target") or event.get("repository") or "")
     targets = event.get("targets")
     if not target and isinstance(targets, list) and targets:
@@ -199,7 +205,7 @@ def event_row(event: dict[str, Any], language: str) -> str:
         if len(targets) > 2:
             target += f" +{len(targets) - 2}"
     suffix = f"  ·  {target}" if target else ""
-    return f"{event_time(event)[11:23]}  {label[2]} {status_text:<7}  {source:<9}  {event_title(event, language)}{suffix}"
+    return f"{event_time(event)[11:19]}  {label[2]} {status_text:<4}  {source:<6}  {event_title(event, language)}{suffix}"
 
 
 def event_details(event: dict[str, Any], language: str, *, raw: bool = False) -> str:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import threading
 import webbrowser
@@ -13,6 +12,7 @@ from typing import Callable
 import customtkinter as ctk
 
 from gui import log_workspace, server_workspace
+from gui.colors import resolve_color
 from gui.config import AppConfig, load_config, save_config
 from gui.connection import run_connection_test as run_smoke_test
 from gui.dialogs import show_result_dialog
@@ -20,6 +20,7 @@ from gui.i18n import tr
 from gui.processes import ProcessManager, format_uptime
 from mcp_app.runtime import launcher_command
 from mcp_app.version import VERSION
+from repo.worktree import inspect_worktree
 from gui.theme import (
     BTN_HEIGHT,
     CARD_RADIUS,
@@ -66,11 +67,22 @@ class LocalRepoMCPApp(ctk.CTk):
         super().__init__()
 
         self.title("Local Repo MCP")
-        self._app_icons = {
-            size: PhotoImage(file=str(ASSETS / f"app-icon-{size}.png"))
-            for size in (16, 32, 40, 64)
-        }
-        self.iconphoto(True, *(self._app_icons[size] for size in (16, 32, 64)))
+        self._app_icons: dict[int, PhotoImage] = {}
+        for size in (16, 32, 40, 64):
+            try:
+                self._app_icons[size] = PhotoImage(
+                    file=str(ASSETS / f"app-icon-{size}.png")
+                )
+            except TclError:
+                pass
+        self.iconphoto(
+            True,
+            *(
+                self._app_icons[size]
+                for size in (16, 32, 64)
+                if size in self._app_icons
+            ),
+        )
         try:
             self.iconbitmap(default=str(ASSETS / "app-icon.ico"))
         except TclError:
@@ -168,15 +180,16 @@ class LocalRepoMCPApp(ctk.CTk):
 
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
         brand.pack(fill="x", padx=16, pady=(22, 24))
-        Label(
-            brand,
-            image=self._app_icons[40],
-            width=40,
-            height=40,
-            background="#0B0C0D",
-            borderwidth=0,
-            highlightthickness=0,
-        ).pack(side="left")
+        if 40 in self._app_icons:
+            Label(
+                brand,
+                image=self._app_icons[40],
+                width=40,
+                height=40,
+                background=resolve_color(COLORS["sidebar"]),
+                borderwidth=0,
+                highlightthickness=0,
+            ).pack(side="left")
         brand_text = ctk.CTkFrame(brand, fg_color="transparent")
         brand_text.pack(side="left", padx=(11, 0))
         ctk.CTkLabel(
@@ -1111,6 +1124,36 @@ class LocalRepoMCPApp(ctk.CTk):
         return box
 
     def _collect_config(self, *, quiet: bool = False) -> AppConfig | None:
+        # Pre-validate numeric fields with field-specific error messages.
+        numeric_fields = {
+            "http_port": (self.http_port_var.get(), 1, 65535),
+            "http_request_kb": (self.http_request_kb_var.get(), 1, 5000),
+            "max_file": (self.max_file_var.get(), 1, 20000),
+            "max_patch": (self.max_patch_var.get(), 1, 5000),
+            "max_search": (self.max_search_var.get(), 1, 1000),
+            "max_output": (self.max_output_var.get(), 1, 2000),
+            "log_max_kb": (self.log_max_kb_var.get(), 64, 100000),
+            "log_backup_count": (self.log_backup_var.get(), 1, 20),
+            "test_timeout": (self.test_timeout_var.get(), 1, 1800),
+        }
+        for field, (raw, low, high) in numeric_fields.items():
+            try:
+                value = int(raw.strip() or "0")
+            except ValueError:
+                if not quiet:
+                    messagebox.showerror(
+                        self.t("error"),
+                        f"{self.t(field)}: {self.t('numeric_invalid')}",
+                    )
+                return None
+            if not low <= value <= high:
+                if not quiet:
+                    messagebox.showerror(
+                        self.t("error"),
+                        f"{self.t(field)}: {self.t('numeric_out_of_range')} ({low}–{high})",
+                    )
+                return None
+
         try:
             cfg = AppConfig(
                 language=self.config_data.language,
@@ -1351,23 +1394,11 @@ class LocalRepoMCPApp(ctk.CTk):
         return Path(raw).name if raw else self.t("not_selected")
 
     def _git_branch(self) -> str:
-        repo = self.repo_var.get().strip()
-        if not repo:
+        raw = self.repo_var.get().strip()
+        if not raw:
             return "—"
-        try:
-            result = subprocess.run(
-                ["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"],
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                timeout=5,
-                check=False,
-                shell=False,
-            )
-            return result.stdout.strip() if result.returncode == 0 else "—"
-        except OSError:
-            return "—"
+        info = inspect_worktree(raw)
+        return info.branch if info.ready else "—"
 
     def _client_config_text(self) -> str:
         cfg = self._collect_config(quiet=True)

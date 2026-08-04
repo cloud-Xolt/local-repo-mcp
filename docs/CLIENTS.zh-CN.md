@@ -8,13 +8,7 @@ Local Repo MCP 可以用于支持 ChatGPT 构建和维护本地项目，但它�
 
 ## 使用 ChatGPT 构建本地项目
 
-Local Repo MCP 要求所选目录是 Git 工作区。新建项目时，先创建空目录并初始化 Git：
-
-```bash
-mkdir my-project
-cd my-project
-git init
-```
+Local Repo MCP 要求所选目录是 Git 工作区。新建项目时，先创建空目录，在 GUI 中选择该目录，并明确确认 Git 初始化提示。
 
 然后执行以下步骤：
 
@@ -102,6 +96,6 @@ STDIO 适用于：
 
 手工执行 `git init` 不是必需步骤。用户选择普通目录时，GUI 会立即检查，并在初始化前要求用户明确确认；手工输入路径时，点击“连接”或“启动”前还会再次检查。
 
-取消确认后目录保持不变。初始化只创建本地 `.git` 元数据，Local Repo MCP 不会创建 Commit、配置远程仓库或发布项目。若所选子目录已经位于现有 Git 工作区中，则直接使用该工作区，不会生成嵌套仓库。
+取消确认后目录保持不变。初始化只创建本地 `.git` 元数据，Local Repo MCP 不会创建 Commit、配置远程仓库或发布项目。若所选子目录已经位于现有 Git 工作区中，该子目录不能作为独立安全边界；GUI 会提示切换到实际的 Git 工作区根目录。
 
 目标机器仍然需要安装 Git 并可通过 `PATH` 找到，因为仓库状态、Diff、Patch 校验和写入锁都依赖 Git。

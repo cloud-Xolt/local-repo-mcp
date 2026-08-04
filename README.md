@@ -113,7 +113,7 @@ The [complete usage guide](docs/USAGE.md) contains the full STDIO, Tunnel, HTTP,
 
 Local Repo MCP can let ChatGPT build and maintain a local Git project within the selected permission mode. It is not limited to ChatGPT: other MCP-compatible coding agents, IDEs, desktop clients, and automation platforms can connect through STDIO or Streamable HTTP and receive the same tools and security controls.
 
-For a new local project, initialize an empty directory with `git init`, select it in the GUI, and use `write` or `test` mode. See [Client compatibility and local project workflow](docs/CLIENTS.md).
+For a new local project, select an empty directory in the GUI, explicitly confirm Git initialization, and use `write` or `test` mode. See [Client compatibility and local project workflow](docs/CLIENTS.md).
 
 
 Current GUI behavior: selecting a plain folder triggers a Git check and an explicit confirmation dialog. Accepting runs `git init`; declining leaves the folder unchanged. Initialization is never silent and does not create commits or remotes. A selected child directory inside a parent Git working tree cannot become a separate security boundary; the GUI asks to switch to the actual Git working-tree root.

@@ -9,12 +9,14 @@ from pathlib import Path
 import pytest
 
 import repo.search as search_module
-from gui.config import AppConfig, apply_config_to_environment
+from gui.config import AppConfig
+from gui.runtime_config import apply_to_environment
 from gui.config_codec import coerce_dataclass
 from gui.config_io import read_json_object
 from gui.processes import ManagedProcess, ProcessManager
 from mcp_app.version import VERSION
-from repo.git import GitController, run_git
+from repo.controller import GitController
+from repo.git import run_git
 from repo.lock import RepositoryLock
 from repo.search import search_repository
 from security.guard import validate_read_path
@@ -36,7 +38,7 @@ def test_explicit_environment_has_priority(tmp_path: Path, monkeypatch) -> None:
     explicit = str(tmp_path / "explicit")
     monkeypatch.setenv("REPO_ROOT", explicit)
     config = AppConfig(repo_root=str(tmp_path / "persisted"))
-    apply_config_to_environment(config, override=False)
+    apply_to_environment(config, override=False)
     assert os.environ["REPO_ROOT"] == explicit
 
 

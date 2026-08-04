@@ -58,7 +58,7 @@ def build_event(record: dict[str, Any]) -> dict[str, Any]:
         "timestamp_ms": int(numeric_timestamp * 1000),
         "timestamp_iso": datetime.fromtimestamp(
             numeric_timestamp, tz=timezone.utc
-        ).astimezone().isoformat(timespec="milliseconds"),
+        ).isoformat(timespec="milliseconds"),
         "level": _level(record),
         "source": _source(record),
         "category": str(

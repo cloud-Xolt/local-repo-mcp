@@ -27,6 +27,7 @@ def test_wheel_contains_only_final_runtime_entry_points(tmp_path: Path) -> None:
             "tools/runtime.py", "tools/execution.py", "tools/reads.py",
             "tools/patches.py", "tools/tests.py", "gui/desktop.py",
             "gui/processes.py", "gui/tunnel.py", "gui/log_workspace.py",
+            "gui/colors.py",
         }
         assert required.issubset(names)
         forbidden = {

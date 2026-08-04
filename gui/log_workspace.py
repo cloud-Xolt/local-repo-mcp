@@ -5,6 +5,7 @@ from tkinter import HORIZONTAL, Listbox, PanedWindow
 
 import customtkinter as ctk
 
+from gui.colors import resolve_color
 from gui.log_center import (
     event_details,
     event_row,
@@ -17,20 +18,13 @@ from gui.log_center import (
 from gui.theme import COLORS, CONTROL_RADIUS, FONT_BODY, FONT_SMALL
 
 
-def _tk_color(value) -> str:
-    if isinstance(value, (tuple, list)):
-        index = 1 if ctk.get_appearance_mode().lower() == "dark" else 0
-        return str(value[index])
-    return str(value)
-
-
 def _place_initial_sash(app) -> None:
     pane = getattr(app, "log_paned", None)
     if pane is None or not pane.winfo_exists():
         return
     width = max(pane.winfo_width(), 900)
     try:
-        pane.sash_place(0, int(width * 0.36), 0)
+        pane.sash_place(0, int(width * 0.46), 0)
     except Exception:
         pass
 
@@ -120,7 +114,7 @@ def build(app) -> None:
         sashrelief="flat",
         showhandle=True,
         handlesize=8,
-        background=_tk_color(COLORS["surface"]),
+        background=resolve_color(COLORS["surface"]),
         borderwidth=0,
         relief="flat",
     )
@@ -134,26 +128,36 @@ def build(app) -> None:
         border_color=COLORS["border"],
     )
     list_frame.grid_rowconfigure(0, weight=1)
+    list_frame.grid_rowconfigure(1, weight=0)
     list_frame.grid_columnconfigure(0, weight=1)
     app.log_listbox = Listbox(
         list_frame,
         height=24,
         activestyle="none",
-        background=_tk_color(COLORS["code"]),
-        foreground=_tk_color(COLORS["text"]),
-        selectbackground=_tk_color(COLORS["accent_soft"]),
-        selectforeground=_tk_color(COLORS["text"]),
+        background=resolve_color(COLORS["code"]),
+        foreground=resolve_color(COLORS["text"]),
+        selectbackground=resolve_color(COLORS["accent_soft"]),
+        selectforeground=resolve_color(COLORS["text"]),
         borderwidth=0,
         highlightthickness=0,
         font=("Consolas" if os.name == "nt" else "monospace", FONT_SMALL),
     )
-    app.log_listbox.grid(row=0, column=0, sticky="nsew", padx=(10, 2), pady=10)
+    app.log_listbox.grid(row=0, column=0, sticky="nsew", padx=(8, 2), pady=(8, 2))
     list_scrollbar = ctk.CTkScrollbar(
         list_frame,
         command=app.log_listbox.yview,
     )
-    list_scrollbar.grid(row=0, column=1, sticky="ns", padx=(2, 8), pady=10)
-    app.log_listbox.configure(yscrollcommand=list_scrollbar.set)
+    list_scrollbar.grid(row=0, column=1, sticky="ns", padx=(2, 6), pady=(8, 2))
+    list_xscrollbar = ctk.CTkScrollbar(
+        list_frame,
+        orientation="horizontal",
+        command=app.log_listbox.xview,
+    )
+    list_xscrollbar.grid(row=1, column=0, sticky="ew", padx=(8, 2), pady=(2, 6))
+    app.log_listbox.configure(
+        yscrollcommand=list_scrollbar.set,
+        xscrollcommand=list_xscrollbar.set,
+    )
     app.log_listbox.bind("<<ListboxSelect>>", lambda _event: show_selected(app))
 
     detail_frame = ctk.CTkFrame(
@@ -223,8 +227,8 @@ def build(app) -> None:
         copy_bar, app.t("copy_raw"), lambda: copy_selected(app, raw=True)
     ).pack(side="left", padx=(4, 0))
 
-    app.log_paned.add(list_frame, minsize=280, width=400, stretch="always")
-    app.log_paned.add(detail_frame, minsize=480, width=700, stretch="always")
+    app.log_paned.add(list_frame, minsize=360, width=470, stretch="always")
+    app.log_paned.add(detail_frame, minsize=460, width=560, stretch="always")
     app.after_idle(lambda: _place_initial_sash(app))
     refresh(app)
     schedule(app)

@@ -79,7 +79,9 @@ def test_child_directory_is_not_an_independent_repository_boundary(
 
 
 def test_runtime_environment_omits_empty_root_and_rejects_weak_token() -> None:
-    environment = environment_for(AppConfig())
+    config = AppConfig()
+    assert "REPO_ROOT" not in config.mcp_env()
+    environment = environment_for(config)
     assert "REPO_ROOT" not in environment
 
     weak = AppConfig(
@@ -153,7 +155,8 @@ def test_tool_visual_catalog_has_distinct_theme_tokens() -> None:
     assert len(TOOL_VISUALS) == 7
     assert len({item.name for item in TOOL_VISUALS}) == 7
     assert len({item.color for item in TOOL_VISUALS}) == 7
-    assert all(item.soft_light != item.soft_dark for item in TOOL_VISUALS)
+    assert all(not hasattr(item, "soft_light") for item in TOOL_VISUALS)
+    assert all(not hasattr(item, "soft_dark") for item in TOOL_VISUALS)
     assert all(item.icon for item in TOOL_VISUALS)
 
 
@@ -172,7 +175,7 @@ def test_log_split_defaults_to_larger_detail_pane() -> None:
 
     app = SimpleNamespace(log_paned=Pane())
     _place_initial_sash(app)
-    assert calls == [(0, 360, 0)]
+    assert calls == [(0, 460, 0)]
 
 
 def test_tunnel_command_quotes_paths_with_spaces() -> None:
@@ -310,4 +313,4 @@ def test_extended_messages_are_localized() -> None:
         "log_backup_count_invalid",
     )
     for language in ("zh", "en"):
-        assert all(translate(language, key) for key in keys)
+        assert all(translate(language, key) != key for key in keys)
