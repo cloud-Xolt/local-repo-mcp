@@ -183,6 +183,41 @@ def test_execution_distinguishes_permission_policy_environment_and_failure(
     assert records[-1]["result_code"] == 2
 
 
+def test_execute_merges_tool_fields_with_command_result_without_duplicate_keys(
+    monkeypatch,
+) -> None:
+    records: list[dict] = []
+    monkeypatch.setattr(
+        "tools.execution.audit_event",
+        lambda _ctx, **record: records.append(record),
+    )
+
+    result = execute(
+        _context("test", records),
+        tool="repo_run_test",
+        modes=("test",),
+        operation=lambda: {
+            "command_key": "go_test",
+            "command_kind": "test",
+            "command": "go test ./...",
+            "status": "failed",
+            "success": False,
+            "returncode": 1,
+            "stdout": "FAIL package",
+            "stderr": "",
+        },
+        command_key="go_test",
+        result_status=lambda value: "failed" if not value["success"] else "success",
+    )
+
+    assert result["returncode"] == 1
+    final = records[-1]
+    assert final["command_key"] == "go_test"
+    assert final["result_code"] == 1
+    assert final["stdout"] == "FAIL package"
+    assert final["status"] == "failed"
+
+
 def test_log_view_explains_policy_denial_and_hides_preflight() -> None:
     events = [
         {"status": "running", "hidden": True, "tool": "repo_run_test"},

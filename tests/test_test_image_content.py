@@ -110,3 +110,34 @@ def test_invalid_marker_is_reported_without_exposing_file(tmp_path: Path) -> Non
 
     assert len(result.content) == 1
     assert "image_warnings" in result.structured_content
+
+
+def test_failed_command_returns_evidence_without_mcp_tool_error(tmp_path: Path) -> None:
+    result = _build_test_result(
+        FakeContext(tmp_path),  # type: ignore[arg-type]
+        {
+            "command_key": "go_test",
+            "command_kind": "test",
+            "command": "go test ./...",
+            "status": "failed",
+            "success": False,
+            "exit_code": 1,
+            "returncode": 1,
+            "stdout": "FAIL package/subject [setup failed]\n",
+            "stderr": "build error: missing symbol\n",
+            "stdout_truncated": False,
+            "stderr_truncated": False,
+            "timeout_seconds": 120,
+            "duration_ms": 27516,
+        },
+    )
+
+    assert result.is_error is False
+    assert result.structured_content["exit_code"] == 1
+    assert result.structured_content["success"] is False
+    text = result.content[0].text
+    assert "exit_code=1" in text
+    assert "stdout:" in text
+    assert "stderr:" in text
+    assert "FAIL package/subject" in text
+    assert "missing symbol" in text

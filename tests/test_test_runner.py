@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.test_runner import RepoTestRunner, _read_bounded, _safe_environment
+from commands.runner import _read_bounded, _safe_environment
+from tools.test_runner import RepoTestRunner
 
 
 def test_rejects_arbitrary_command(tmp_path: Path) -> None:

@@ -17,6 +17,7 @@ from gui.config import AppConfig, load_config, save_config
 from gui.connection import run_connection_test as run_smoke_test
 from gui.dialogs import show_result_dialog
 from gui.i18n import tr
+from gui.widget_cleanup import destroy_children
 from gui.processes import ProcessManager, format_uptime
 from mcp_app.runtime import launcher_command
 from mcp_app.version import VERSION
@@ -147,6 +148,10 @@ class LocalRepoMCPApp(ctk.CTk):
         self.max_search_var = ctk.StringVar(value=str(cfg.max_search_results))
         self.max_output_var = ctk.StringVar(value=str(cfg.max_output_bytes // 1000))
         self.test_timeout_var = ctk.StringVar(value=str(cfg.test_timeout_max))
+        self.test_artifact_dir_var = ctk.StringVar(value=cfg.test_artifact_dir)
+        self.test_max_images_var = ctk.StringVar(value=str(cfg.max_test_images))
+        self.test_image_max_kb_var = ctk.StringVar(value=str(cfg.max_test_image_bytes // 1024))
+        self.test_image_total_kb_var = ctk.StringVar(value=str(cfg.max_test_image_total_bytes // 1024))
         self.audit_var = ctk.StringVar(value=cfg.audit_log)
         self.mcp_log_var = ctk.StringVar(value=cfg.mcp_log)
         self.log_max_kb_var = ctk.StringVar(value=str(cfg.log_max_bytes // 1000))
@@ -162,8 +167,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self.log_auto_var = ctk.BooleanVar(value=True)
 
     def _build_shell(self) -> None:
-        for child in self.winfo_children():
-            child.destroy()
+        destroy_children(self)
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -275,14 +279,14 @@ class LocalRepoMCPApp(ctk.CTk):
         language.set("中文" if self.config_data.language == "zh" else "English")
         language.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
-        appearance = ctk.CTkOptionMenu(
+        appearance = ctk.CTkSegmentedButton(
             prefs,
-            height=40,
-            width=96,
             values=[self.t("system"), self.t("light"), self.t("dark")],
-            fg_color=COLORS["surface_alt"],
-            button_color=COLORS["border_strong"],
-            button_hover_color=COLORS["muted"],
+            height=40,
+            selected_color=COLORS["accent_soft"],
+            selected_hover_color=COLORS["surface_hover"],
+            unselected_color=COLORS["surface_alt"],
+            unselected_hover_color=COLORS["surface_hover"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=FONT_SMALL),
             command=self._change_appearance,
@@ -359,8 +363,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self.page_title.configure(text=self.t(page))
         self.page_subtitle.configure(text=self.t(PAGE_SUBTITLES[page]))
 
-        for child in self.page_container.winfo_children():
-            child.destroy()
+        destroy_children(self.page_container)
 
         {
             "home": self._build_home,
@@ -858,6 +861,10 @@ class LocalRepoMCPApp(ctk.CTk):
                 row=4,
                 column=1,
             )
+            self._field(advanced, self.t("test_max_images"), self.test_max_images_var, row=5, column=0)
+            self._field(advanced, self.t("test_image_max_kb"), self.test_image_max_kb_var, row=5, column=1)
+            self._field(advanced, self.t("test_image_total_kb"), self.test_image_total_kb_var, row=6, column=0)
+            self._field(advanced, self.t("test_artifact_dir"), self.test_artifact_dir_var, row=6, column=1)
             warning = ctk.CTkFrame(
                 advanced,
                 fg_color=COLORS["warning_soft"],
@@ -880,6 +887,7 @@ class LocalRepoMCPApp(ctk.CTk):
                 text_color=COLORS["muted"],
                 font=ctk.CTkFont(size=FONT_SMALL),
             ).pack(anchor="w", padx=12, pady=(0, 11))
+            warning.grid_configure(row=7)
 
         action_bar = ctk.CTkFrame(
             page,
@@ -1135,6 +1143,9 @@ class LocalRepoMCPApp(ctk.CTk):
             "log_max_kb": (self.log_max_kb_var.get(), 64, 100000),
             "log_backup_count": (self.log_backup_var.get(), 1, 20),
             "test_timeout": (self.test_timeout_var.get(), 1, 1800),
+            "test_max_images": (self.test_max_images_var.get(), 1, 20),
+            "test_image_max_kb": (self.test_image_max_kb_var.get(), 1, 8192),
+            "test_image_total_kb": (self.test_image_total_kb_var.get(), 1, 8192),
         }
         for field, (raw, low, high) in numeric_fields.items():
             try:
@@ -1189,6 +1200,10 @@ class LocalRepoMCPApp(ctk.CTk):
                 log_max_bytes=int(self.log_max_kb_var.get()) * 1000,
                 log_backup_count=int(self.log_backup_var.get()),
                 test_timeout_max=int(self.test_timeout_var.get()),
+                test_artifact_dir=self.test_artifact_dir_var.get().strip(),
+                max_test_images=int(self.test_max_images_var.get()),
+                max_test_image_bytes=int(self.test_image_max_kb_var.get()) * 1024,
+                max_test_image_total_bytes=int(self.test_image_total_kb_var.get()) * 1024,
                 tunnel_client_path=self.tunnel_path_var.get().strip() or "tunnel-client",
                 tunnel_id=self.tunnel_id_var.get().strip(),
                 tunnel_profile=self.tunnel_profile_var.get().strip() or "local-repo",

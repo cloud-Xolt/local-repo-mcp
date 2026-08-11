@@ -13,7 +13,7 @@ TOOL_TITLES = {
     "repo_git_status": ("查看 Git 状态", "Read Git status"),
     "repo_git_diff": ("查看 Git 差异", "Read Git diff"),
     "repo_apply_patch": ("应用 Patch", "Apply patch"),
-    "repo_run_test": ("运行测试", "Run tests"),
+    "repo_run_test": ("运行验证命令", "Run verification commands"),
 }
 EVENT_TITLES = {
     "server_start": ("MCP 服务启动", "MCP server started"),
@@ -22,6 +22,8 @@ EVENT_TITLES = {
     "http_listen": ("HTTP 开始监听", "HTTP listener started"),
     "http_authentication": ("HTTP 认证", "HTTP authentication"),
     "process_output": ("进程输出", "Process output"),
+    "command_start": ("仓库命令开始", "Repository command started"),
+    "command_finish": ("仓库命令结束", "Repository command finished"),
     "tunnel_detect": ("Tunnel 环境检测", "Tunnel environment check"),
     "tunnel_doctor": ("Tunnel Doctor", "Tunnel Doctor"),
     "tunnel_start": ("Tunnel 启动", "Tunnel started"),
@@ -231,10 +233,15 @@ def event_details(event: dict[str, Any], language: str, *, raw: bool = False) ->
     ]
     for key, labels in (
         ("target", ("目标", "Target")),
+        ("command_key", ("命令键", "Command key")),
+        ("command_kind", ("命令类型", "Command kind")),
+        ("command_status", ("命令状态", "Command status")),
+        ("child_process_id", ("子进程", "Child process")),
         ("duration_ms", ("耗时", "Duration")),
         ("mode", ("权限模式", "Permission mode")),
         ("transport", ("传输", "Transport")),
         ("process_id", ("进程", "Process")),
+        ("repository_root", ("仓库路径", "Repository root")),
         ("event_id", ("事件 ID", "Event ID")),
         ("denial_kind", ("拒绝类型", "Denial kind")),
         ("failure_kind", ("失败类型", "Failure kind")),
@@ -242,9 +249,17 @@ def event_details(event: dict[str, Any], language: str, *, raw: bool = False) ->
         ("result_code", ("退出码", "Exit code")),
         ("error_type", ("错误类型", "Error type")),
         ("message", ("消息", "Message")),
+        ("stdout", ("标准输出", "Stdout")),
+        ("stderr", ("标准错误", "Stderr")),
     ):
         value = event.get(key)
         if value not in (None, ""):
+            if key in {"stdout", "stderr", "reason", "message"}:
+                rendered = str(value).strip()
+                if "\n" in rendered:
+                    value = "\n  " + rendered.replace("\n", "\n  ")
+                else:
+                    value = rendered
             fields.append((labels, f"{value} ms" if key == "duration_ms" else str(value)))
     targets = event.get("targets")
     if isinstance(targets, list) and targets:
@@ -257,6 +272,10 @@ def event_details(event: dict[str, Any], language: str, *, raw: bool = False) ->
 
 def _compact_details(event: dict[str, Any]) -> str:
     details: list[str] = []
+    if event.get("command_key"):
+        command = str(event["command_key"])
+        kind = str(event.get("command_kind", "")).upper()
+        details.append(f"{kind} {command}".strip())
     for key in ("transport", "mode"):
         value = event.get(key)
         if value:

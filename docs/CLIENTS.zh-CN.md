@@ -15,7 +15,7 @@ Local Repo MCP 要求所选目录是 Git 工作区。新建项目时，先创建
 1. 启动 Local Repo MCP GUI。
 2. 选择刚创建的 Git 工作区。
 3. ChatGPT 只需要创建和修改项目文件时，选择 `write` 模式。
-4. ChatGPT 还需要运行预定义测试命令时，选择 `test` 模式。
+4. ChatGPT 还需要运行白名单 test/build/lint/check 命令时，选择 `test` 模式。
 5. 选择连接方式。
 6. 连接 ChatGPT，并描述需要生成的项目结构、源代码、配置、文档和测试。
 
@@ -24,9 +24,9 @@ Local Repo MCP 要求所选目录是 Git 工作区。新建项目时，先创建
 - 检查仓库目录结构；
 - 读取允许访问的 UTF-8 文本文件；
 - 检索代码；
-- 通过经过校验的统一 Patch 创建和修改文件；
+- 通过经过校验的统一 Patch 原子创建和修改一个或多个文件；
 - 查看经过过滤的 Git 状态和 Diff；
-- 在 `test` 模式运行预定义测试。
+- 在 `test` 模式运行单个或有界顺序批量的白名单验证命令，并获得可核验执行结果。
 
 Local Repo MCP 不开放无限制 Shell，也不允许任意 checkout、commit、reset、rebase、merge、pull 或 push 操作。
 
@@ -81,8 +81,8 @@ STDIO 适用于：
 | `repo_search_code` | 执行有边界的固定字符串检索。 |
 | `repo_git_status` | 读取经过过滤的 Git 状态。 |
 | `repo_git_diff` | 读取受大小限制并经过过滤的 Git Diff。 |
-| `repo_apply_patch` | 应用经过校验的统一文本 Patch。 |
-| `repo_run_test` | 在 `test` 模式运行一个预定义测试命令。 |
+| `repo_apply_patch` | 原子应用统一文本 Patch，可一次修改多个文件。 |
+| `repo_run_test` | 在 `test` 模式运行单个或有界批量的白名单验证命令，并返回退出码与 stdout/stderr。 |
 
 所有客户端都受到相同的以下控制：
 

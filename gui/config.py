@@ -102,6 +102,10 @@ class AppConfig:
     log_max_bytes: int = 5_000_000
     log_backup_count: int = 3
     test_timeout_max: int = 300
+    test_artifact_dir: str = "test-artifacts"
+    max_test_images: int = 6
+    max_test_image_bytes: int = 5 * 1024 * 1024
+    max_test_image_total_bytes: int = 2 * 1024 * 1024
 
     tunnel_client_path: str = "tunnel-client"
     tunnel_id: str = ""
@@ -176,9 +180,19 @@ class AppConfig:
             (self.log_max_bytes, "log_max_bytes_invalid", 64_000, 100_000_000),
             (self.log_backup_count, "log_backup_count_invalid", 1, 20),
             (self.test_timeout_max, "test_timeout_invalid", 1, 1800),
+            (self.max_test_images, "test_max_images_invalid", 1, 20),
+            (self.max_test_image_bytes, "test_image_max_invalid", 1, 8 * 1024 * 1024),
+            (self.max_test_image_total_bytes, "test_image_total_invalid", 1, 8 * 1024 * 1024),
         ):
             if not isinstance(value, int) or not low <= value <= high:
                 errors.append(key)
+        artifact_dir = self.test_artifact_dir.strip()
+        if not artifact_dir:
+            errors.append("test_artifact_dir_invalid")
+        else:
+            artifact_path = Path(artifact_dir)
+            if artifact_path.is_absolute() or ".." in artifact_path.parts:
+                errors.append("test_artifact_dir_invalid")
         if self.mcp_mode in {"write", "test"} and not self.audit_log.strip():
             errors.append("audit_log_required")
 
@@ -263,6 +277,10 @@ class AppConfig:
             "LOG_MAX_BYTES": str(self.log_max_bytes),
             "LOG_BACKUP_COUNT": str(self.log_backup_count),
             "TEST_TIMEOUT_MAX": str(self.test_timeout_max),
+            "TEST_ARTIFACT_DIR": self.test_artifact_dir.strip() or "test-artifacts",
+            "MAX_TEST_IMAGES": str(self.max_test_images),
+            "MAX_TEST_IMAGE_BYTES": str(self.max_test_image_bytes),
+            "MAX_TEST_IMAGE_TOTAL_BYTES": str(self.max_test_image_total_bytes),
             "HTTP_HOST": self.http_host.strip() or "127.0.0.1",
             "HTTP_PORT": str(self.http_port),
             "HTTP_PATH": self.http_path.strip() or "/mcp",

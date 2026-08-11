@@ -17,6 +17,7 @@ from gui.connection import run_connection_test
 from gui.i18n import tr
 from gui.processes import ProcessManager
 from gui.theme import COLORS, FONT_BODY
+from gui.widget_cleanup import destroy_children
 from gui.tunnel import TunnelManager
 from repo.worktree import initialize_worktree, inspect_worktree
 
@@ -88,8 +89,7 @@ class LocalRepoMCPApp(BaseApplication):
             )
         self.page_title.configure(text=self.t(page))
         self.page_subtitle.configure(text=self.t(PAGE_SUBTITLES[page]))
-        for child in self.page_container.winfo_children():
-            child.destroy()
+        destroy_children(self.page_container)
         {
             "home": self._build_home,
             "server": self._build_server,

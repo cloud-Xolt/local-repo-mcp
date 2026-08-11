@@ -3,6 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from repo.search import search_repository
+from tools.contracts import (
+    GitDiffResult,
+    GitStatusResult,
+    ListFilesResult,
+    ReadFileResult,
+    SearchCodeResult,
+)
 from tools.execution import execute
 from tools.runtime import RuntimeContext, repository_info
 
@@ -11,7 +18,7 @@ READ_MODES = ("read", "write", "test")
 
 def register_read_tools(context: RuntimeContext) -> None:
     @context.mcp.tool()
-    def repo_list_files(path: str = ".", limit: int = 200) -> dict[str, Any]:
+    def repo_list_files(path: str = ".", limit: int = 200) -> ListFilesResult:
         target = path or "."
         result = execute(
             context,
@@ -24,7 +31,7 @@ def register_read_tools(context: RuntimeContext) -> None:
         return result
 
     @context.mcp.tool()
-    def repo_read_file(path: str) -> dict[str, Any]:
+    def repo_read_file(path: str) -> ReadFileResult:
         result = execute(
             context,
             tool="repo_read_file",
@@ -36,7 +43,7 @@ def register_read_tools(context: RuntimeContext) -> None:
         return result
 
     @context.mcp.tool()
-    def repo_search_code(query: str, limit: int = 50) -> dict[str, Any]:
+    def repo_search_code(query: str, limit: int = 50) -> SearchCodeResult:
         effective_limit = min(max(limit, 1), context.max_search_results)
 
         def search() -> dict[str, Any]:
@@ -65,7 +72,7 @@ def register_read_tools(context: RuntimeContext) -> None:
         return result
 
     @context.mcp.tool()
-    def repo_git_status() -> dict[str, Any]:
+    def repo_git_status() -> GitStatusResult:
         result = execute(
             context,
             tool="repo_git_status",
@@ -79,7 +86,7 @@ def register_read_tools(context: RuntimeContext) -> None:
     def repo_git_diff(
         staged: bool = False,
         max_bytes: int = 20_000,
-    ) -> dict[str, Any]:
+    ) -> GitDiffResult:
         result = execute(
             context,
             tool="repo_git_diff",

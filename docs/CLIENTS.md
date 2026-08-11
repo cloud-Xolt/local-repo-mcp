@@ -15,7 +15,7 @@ Then:
 1. Start the Local Repo MCP GUI.
 2. Select the new Git working tree.
 3. Choose `write` mode when ChatGPT only needs to create and modify project files.
-4. Choose `test` mode when ChatGPT also needs to run predefined test commands.
+4. Choose `test` mode when ChatGPT also needs to run allowlisted test/build/lint/check commands.
 5. Choose a connection method.
 6. Connect ChatGPT and request the project structure, source files, configuration, documentation, and tests that should be created.
 
@@ -24,9 +24,9 @@ Within the selected permission mode, ChatGPT can:
 - inspect the repository structure;
 - read allowed UTF-8 text files;
 - search the codebase;
-- create and modify files through validated unified patches;
+- atomically create and modify one or more files through validated unified patches;
 - review filtered Git status and diff output;
-- run predefined tests in `test` mode.
+- run one or a bounded sequential batch of allowlisted verification commands in `test` mode and receive verifiable execution evidence.
 
 Local Repo MCP does not expose an unrestricted shell. It also does not allow arbitrary checkout, commit, reset, rebase, merge, pull, or push operations.
 
@@ -81,8 +81,8 @@ Client identity does not change the server capability set. ChatGPT and other MCP
 | `repo_search_code` | Search using a bounded fixed string. |
 | `repo_git_status` | Read filtered Git status. |
 | `repo_git_diff` | Read a bounded, filtered Git diff. |
-| `repo_apply_patch` | Apply a validated unified text patch. |
-| `repo_run_test` | Run one predefined test command in `test` mode. |
+| `repo_apply_patch` | Atomically apply a unified text patch that may modify multiple files. |
+| `repo_run_test` | Run one or a bounded batch of allowlisted verification commands in `test` mode and return exit code plus stdout/stderr. |
 
 Every client is subject to the same:
 

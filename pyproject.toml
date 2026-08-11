@@ -17,6 +17,7 @@ dependencies = [
   "httpx==0.28.1",
   "PyYAML==6.0.3",
   "pytest==8.4.2",
+  "typing-extensions==4.16.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,7 @@ local-repo-mcp-gui = "gui.desktop:main"
 [tool.setuptools]
 packages = [
   "audit",
+  "commands",
   "gui",
   "mcp_app",
   "repo",
@@ -38,6 +40,7 @@ packages = [
 
 [tool.setuptools.package-dir]
 audit = "src/audit"
+commands = "src/commands"
 gui = "gui"
 mcp_app = "src/mcp_app"
 repo = "src/repo"

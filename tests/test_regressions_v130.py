@@ -147,7 +147,7 @@ def test_process_stability_detects_early_exit() -> None:
 
 
 def test_shared_version() -> None:
-    assert VERSION == "1.3.0"
+    assert VERSION == "1.4.0"
 
 
 def test_pyproject_uses_shared_version_and_entrypoints() -> None:

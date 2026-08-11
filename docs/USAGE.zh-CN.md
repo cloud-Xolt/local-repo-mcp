@@ -98,7 +98,7 @@ local-repo-mcp
 
 包含读取和写入能力，并允许调用 `repo_run_test`。
 
-Test 模式只运行预定义的命令键，但仓库代码仍会以当前操作系统用户权限执行。该模式不是沙箱。
+Test 模式只运行固定注册的 test/build/lint/check 命令；支持单命令和最多 8 个命令的有界顺序批量，整批会在首个命令启动前完成白名单校验。仓库代码仍以当前操作系统用户权限执行，该模式不是沙箱。
 
 ## 6. 使用 STDIO
 
@@ -257,8 +257,8 @@ HTTP_PROXY_TRUSTED_IPS=10.0.0.0/8
 
 1. 切换到 `test` 模式；
 2. 检查当前仓库修改；
-3. 使用允许的 `command_key` 调用 `repo_run_test`；
-4. 检查返回码、stdout、stderr 和输出截断标记。
+3. 单命令使用允许的 `command_key`；批量验证使用 `command_keys`，并按需设置 `stop_on_failure`；
+4. 检查每个命令返回的 `status`、`exit_code`、stdout、stderr、耗时和输出截断标记。
 
 Local Repo MCP 不会自动提交或推送修改。
 
@@ -266,7 +266,7 @@ Local Repo MCP 不会自动提交或推送修改。
 
 打开**日志**页面，可以查看：
 
-- **MCP**：Server 生命周期、连接测试、HTTP 进程输出和工具事件；
+- **MCP**：Server 生命周期、连接测试、HTTP 进程输出、工具事件以及白名单命令开始/结束状态；
 - **Tunnel**：Tunnel 检测、初始化、诊断、启动、停止和进程输出；
 - **审计**：仓库操作和执行结果；
 - **安全事件**：认证拒绝和权限拒绝等事件。
@@ -322,11 +322,7 @@ $XDG_CONFIG_HOME/local-repo-mcp/
 python -m pytest -q -p no:cacheprovider
 ```
 
-当前基线：
-
-```text
-90 passed, 1 platform-dependent test skipped
-```
+测试数量会随功能演进变化；工程验收以本次完整 pytest 输出的退出码和通过/跳过/失败统计为准，不在文档中固化易过期的测试数量。
 
 ## 14. 常见故障排查
 
@@ -376,7 +372,7 @@ git -C /path/to/repository rev-parse --is-inside-work-tree
 
 ### 测试执行被拒绝
 
-确认当前模式为 `test`，并且传入的 `command_key` 属于预定义测试命令。
+确认当前模式为 `test`，并且 `command_key` / `command_keys` 全部属于固定白名单；批量调用中任一 key 非法时整批会在执行前被拒绝。
 
 ## 15. 安全检查清单
 
@@ -402,4 +398,4 @@ git -C /path/to/repository rev-parse --is-inside-work-tree
 
 如果所选目录已经位于父级 Git 工作区中，Local Repo MCP 会使用现有仓库，不会创建嵌套 `.git`。目标机器仍需安装 Git，并可通过 `PATH` 找到。
 
-增加该行为后的回归基线为 `95 passed, 1 platform-dependent test skipped`。
+该目录/Git 初始化行为持续由回归测试覆盖，验收以当前完整测试输出为准。

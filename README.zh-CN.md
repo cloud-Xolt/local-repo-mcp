@@ -1,12 +1,14 @@
-# Local Repo MCP 1.3.0
+# Local Repo MCP 1.4.0
 
 [简体中文](README.zh-CN.md) | [English](README.md)
 
 面向单个本地 Git 仓库的轻量、安全型 MCP Server。
 
+**第一约束：** 只提供受控的仓库读写、测试/构建/检查执行与可核验结果回传；保持轻量、单仓库、固定工具面，不演进为 Agent、任务编排平台或通用远程 Shell。
+
 ## 核心能力
 
-- 固定 7 个 MCP 工具：文件列表、UTF-8 读取、固定字符串搜索、过滤后的 Git 状态与差异、统一 Patch 写入、预定义测试。
+- 固定 7 个 MCP 工具：文件列表、UTF-8 读取、固定字符串搜索、过滤后的 Git 状态与差异、原子统一 Patch、白名单验证命令。
 - `read`、`write`、`test` 三种权限模式。
 - 支持 STDIO、OpenAI Secure MCP Tunnel 和 Streamable HTTP。
 - 远程 HTTP 支持原生 HTTPS/mTLS，也支持可信 TLS 反向代理。
@@ -77,7 +79,7 @@ Local Repo MCP 不会执行 checkout、commit、reset、rebase、merge、pull �
 
 ## 权限模式
 
-| 模式 | 读取/列表/检索/状态/Diff | 应用受校验 Patch | 运行预定义测试 |
+| 模式 | 读取/列表/检索/状态/Diff | 应用受校验 Patch | 运行白名单验证命令 |
 | --- | --- | --- | --- |
 | `read` | 支持 | 不支持 | 不支持 |
 | `write` | 支持 | 支持 | 不支持 |
@@ -94,8 +96,25 @@ Test 模式会以当前操作系统用户权限执行仓库代码。该模式不
 | `repo_search_code` | 执行有数量和输出限制的固定字符串检索。 |
 | `repo_git_status` | 返回经过敏感路径过滤的 Git 工作区状态。 |
 | `repo_git_diff` | 返回经过过滤和大小限制的 Git Diff。 |
-| `repo_apply_patch` | 应用一个经过校验的统一文本 Patch。 |
-| `repo_run_test` | 在 `test` 模式运行一个预定义测试命令。 |
+| `repo_apply_patch` | 原子应用一个经过校验的统一文本 Patch；单次可修改多个文件，任一目标失败则整体不应用。 |
+| `repo_run_test` | 在 `test` 模式运行一个或一批白名单 test/build/lint/check 命令；返回可核验的退出码与 stdout/stderr。 |
+
+`repo_run_test` 保留历史工具名以兼容现有客户端，内部统一由受控命令执行层处理。当前白名单包括 `python_pytest`、`go_test`、`go_build`、`go_vet`、`node_test`、`node_build`、`node_lint`、`maven_test`、`maven_build`、`gradle_test`、`gradle_build`。
+
+单命令继续传 `command_key`。批量执行传 `command_keys`（最多 8 个），整批命令会在执行前完成白名单校验，然后按顺序执行；`stop_on_failure=true` 时遇到首个失败即停止，设为 `false` 时继续执行剩余命令。这里的“批量”只是一次 MCP 调用中的有界顺序执行，不引入队列、后台任务或调度器。
+
+每个已启动命令都返回统一证据：
+
+- `command_key` / `command_kind` / `command`
+- `status` / `success` / `exit_code`（兼容保留 `returncode`）
+- `stdout` / `stderr` 及截断标志
+- `duration_ms` / `timeout_seconds`
+
+超时或输出达到保护上限时同样返回结构化失败和已经捕获的输出，不会因为异常路径丢掉核验证据。命令生命周期写入运行/审计日志，但 stdout/stderr 不写入日志。
+
+全部 7 个公开工具都发布明确的 MCP 输入/输出协议契约。服务端依赖 MCP SDK 原生 structured output 生成能力，不针对 GPT 或其他客户端手工改 schema；GUI 的连接验证会在接受连接前检查工具 schema 是否缺失或无效。可选集合参数使用“可选参数 + 非空数组 schema”表达，而不是 nullable union。
+
+`src/tools/contracts.py` 是公开工具面的统一协议契约模块。协议回归直接检查真实 `MCPServer.list_tools()` 返回值，包括固定 7 个 Tool、每个 Tool 必须存在 `outputSchema`，以及输入 schema 的兼容性要求。
 
 ## 首次使用流程
 

@@ -29,9 +29,11 @@ def test_wheel_contains_only_final_runtime_entry_points(tmp_path: Path) -> None:
         with zipfile.ZipFile(wheel) as archive:
             names = set(archive.namelist())
             required = {
+                "commands/models.py", "commands/registry.py", "commands/runner.py",
                 "mcp_app/launcher.py", "mcp_app/service.py", "mcp_app/http_policy.py",
-                "tools/runtime.py", "tools/execution.py", "tools/reads.py",
-                "tools/patches.py", "tools/tests.py", "gui/desktop.py",
+                "tools/runtime.py", "tools/execution.py", "tools/contracts.py", "tools/reads.py",
+                "tools/patches.py", "tools/test_runner.py", "tools/tests.py",
+                "gui/desktop.py",
                 "gui/processes.py", "gui/tunnel.py", "gui/log_workspace.py",
                 "gui/colors.py", "gui/readiness.py", "security/tokens.py",
             }
@@ -53,7 +55,9 @@ def test_wheel_contains_only_final_runtime_entry_points(tmp_path: Path) -> None:
             metadata_content = archive.read(metadata_name).decode("utf-8")
         assert "local-repo-mcp = mcp_app.launcher:main" in entry_content
         assert "local-repo-mcp-gui = gui.desktop:main" in entry_content
+        assert "Version: 1.4.0" in metadata_content
         assert "Requires-Dist: pytest==" in metadata_content
+        assert "Requires-Dist: typing-extensions==4.16.0" in metadata_content
     finally:
         shutil.rmtree(ROOT / "build", ignore_errors=True)
         shutil.rmtree(ROOT / "local_repo_mcp.egg-info", ignore_errors=True)

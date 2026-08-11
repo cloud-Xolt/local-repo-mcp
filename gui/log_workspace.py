@@ -82,18 +82,22 @@ def build(app) -> None:
     search.grid(row=0, column=0, sticky="ew", padx=(0, 8))
     search.bind("<KeyRelease>", lambda _event: refresh(app))
 
-    level = ctk.CTkOptionMenu(
+    level = ctk.CTkSegmentedButton(
         filters,
-        variable=app.log_level_var,
         values=["ALL", "INFO", "WARN", "ERROR", "SECURITY"],
-        width=120,
         height=42,
-        fg_color=COLORS["surface_alt"],
-        button_color=COLORS["border_strong"],
-        button_hover_color=COLORS["muted"],
+        selected_color=COLORS["accent_soft"],
+        selected_hover_color=COLORS["surface_hover"],
+        unselected_color=COLORS["surface_alt"],
+        unselected_hover_color=COLORS["surface_hover"],
         text_color=COLORS["text"],
-        command=lambda _value: refresh(app),
+        font=ctk.CTkFont(size=FONT_SMALL),
+        command=lambda value: (
+            app.log_level_var.set(value),
+            refresh(app),
+        ),
     )
+    level.set(app.log_level_var.get() or "ALL")
     level.grid(row=0, column=1, padx=4)
     ctk.CTkSwitch(
         filters,

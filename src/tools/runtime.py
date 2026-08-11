@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from audit.logger import AuditLogger
+from commands.runner import RepoCommandRunner
 from mcp.server.mcpserver import MCPServer
 from repo.controller import GitController
 from repo.filesystem import RepoFilesystem
@@ -14,7 +15,6 @@ from repo.git import run_git
 from repo.lock import RepositoryLock
 from repo.worktree import require_worktree_root
 from security.scanner import SecretScanner
-from tools.test_runner import RepoTestRunner
 
 
 @dataclass
@@ -34,7 +34,7 @@ class RuntimeContext:
     scanner: SecretScanner
     audit: AuditLogger | None
     runtime_log: AuditLogger | None
-    test_runner: RepoTestRunner
+    command_runner: RepoCommandRunner
     patch_lock: RepositoryLock
 
 
@@ -137,9 +137,10 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
             if runtime_log.enabled and runtime_log.path != audit.path
             else None
         ),
-        test_runner=RepoTestRunner(repo_root, max_output, test_timeout),
+        command_runner=RepoCommandRunner(repo_root, max_output, test_timeout),
         patch_lock=RepositoryLock(repo_root),
     )
+    context.command_runner.event_sink = lambda event: audit_event(context, **event)
     audit_event(context, event="server_start", status="success")
     return context
 

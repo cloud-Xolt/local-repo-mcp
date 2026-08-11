@@ -5,6 +5,7 @@ from typing import Any
 
 from audit.logger import AuditLogger
 from repo.git import parse_deleted_patch_paths, reject_unsupported_patch_types
+from tools.contracts import ApplyPatchResult
 from tools.execution import execute
 from tools.runtime import RuntimeContext, audit_event, repository_info
 
@@ -13,7 +14,13 @@ _PATCH_LOCK = threading.Lock()
 
 def register_patch_tools(context: RuntimeContext) -> None:
     @context.mcp.tool()
-    def repo_apply_patch(patch: str) -> dict[str, Any]:
+    def repo_apply_patch(patch: str) -> ApplyPatchResult:
+        """Atomically apply one validated unified text patch.
+
+        One patch may contain multiple repository text-file targets. All targets
+        are validated before mutation and Git applies the patch as one locked
+        operation, so a target failure does not leave a partial multi-file edit.
+        """
         patch_bytes = len(patch.encode("utf-8"))
         targets: list[str] = []
 

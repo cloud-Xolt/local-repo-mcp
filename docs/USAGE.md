@@ -98,7 +98,7 @@ Patch writes are limited to validated unified text patches. Sensitive paths, uns
 
 Includes read and write capabilities and enables `repo_run_test`.
 
-Test mode runs only predefined command keys, but the selected repository's code still executes with the current operating-system user's permissions. It is not sandboxed.
+Test mode runs only registered test/build/lint/check commands. It supports one command or a bounded sequential batch of at most 8 commands, with the entire batch allowlist-validated before the first command starts. Repository code still executes with the current operating-system user's permissions; this is not a sandbox.
 
 ## 6. Use STDIO
 
@@ -257,8 +257,8 @@ A typical test workflow is:
 
 1. switch to `test` mode;
 2. inspect the repository changes;
-3. call `repo_run_test` with an allowed `command_key`;
-4. review return code, stdout, stderr, and truncation indicators.
+3. use an allowed `command_key` for one command, or `command_keys` for a batch, with `stop_on_failure` as needed;
+4. review each command's `status`, `exit_code`, stdout, stderr, duration, and truncation indicators.
 
 Local Repo MCP never commits or pushes the resulting changes.
 
@@ -266,7 +266,7 @@ Local Repo MCP never commits or pushes the resulting changes.
 
 Open **Logs** to view:
 
-- **MCP** — server lifecycle, connection tests, HTTP process output, and tool events;
+- **MCP** — server lifecycle, connection tests, HTTP process output, tool events, and allowlisted command start/finish status;
 - **Tunnel** — Tunnel detection, initialization, Doctor, start, stop, and process output;
 - **Audit** — repository operations and execution results;
 - **Security** — denied authentication and permission-related events.
@@ -322,11 +322,7 @@ From the source repository:
 python -m pytest -q -p no:cacheprovider
 ```
 
-Current baseline:
-
-```text
-90 passed, 1 platform-dependent test skipped
-```
+Test counts change as the project evolves. Release verification uses the exit code and pass/skip/fail summary from the current full pytest run instead of a hard-coded count in documentation.
 
 ## 14. Troubleshooting
 
@@ -376,7 +372,7 @@ Local Repo MCP falls back to a bounded Python search when `rg` is unavailable. I
 
 ### Test execution is denied
 
-Confirm that the mode is `test` and that the requested `command_key` is one of the predefined test commands.
+Confirm that the mode is `test` and that every `command_key` / `command_keys` entry is in the fixed allowlist. A batch containing any invalid key is rejected before execution begins.
 
 ## 15. Security checklist
 
@@ -402,4 +398,4 @@ When the folder is not already in a Git working tree, the GUI asks for explicit 
 
 If the selected directory is already inside a parent Git working tree, Local Repo MCP uses that existing repository and does not create a nested `.git` directory. Git itself must still be installed and available on `PATH`.
 
-The regression baseline after adding this behavior is `95 passed, 1 platform-dependent test skipped`.
+The directory/Git-initialization behavior remains covered by regression tests; acceptance uses the current full test output.

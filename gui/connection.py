@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from gui.config import AppConfig
 from gui.runtime_config import environment_for
 from mcp_app.runtime import launcher_command
+from tools.contracts import contract_problems
 
 ROOT = Path(__file__).resolve().parents[1]
 LogCallback = Callable[[str], None] | None
@@ -48,7 +49,11 @@ async def _exercise_session(
     _emit(callback, "MCP initialize completed")
 
     listed = await session.list_tools()
-    tools = [tool.name for tool in getattr(listed, "tools", [])]
+    listed_tools = list(getattr(listed, "tools", []))
+    tools = [tool.name for tool in listed_tools]
+    problems = contract_problems(listed_tools)
+    if problems:
+        raise RuntimeError("invalid MCP tool contracts: " + "; ".join(problems))
     if "repo_git_status" not in tools:
         raise RuntimeError("repo_git_status was not exposed by the MCP server")
     _emit(callback, f"Discovered {len(tools)} MCP tools")

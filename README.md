@@ -1,12 +1,14 @@
-# Local Repo MCP 1.3.0
+# Local Repo MCP 1.4.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 A focused, security-oriented MCP server for exactly one configured Git repository.
 
+**Primary constraint:** provide only controlled repository access, allowlisted test/build/check execution, and verifiable result return. Keep the server lightweight, single-repository, and fixed-surface; do not evolve it into an Agent, orchestration platform, or general remote shell.
+
 ## Capabilities
 
-- Seven fixed MCP tools for file listing, UTF-8 reads, fixed-string search, filtered Git status/diff, validated unified patches, and predefined tests.
+- Seven fixed MCP tools for file listing, UTF-8 reads, fixed-string search, filtered Git status/diff, atomic unified patches, and allowlisted verification commands.
 - Three permission modes: `read`, `write`, and `test`.
 - STDIO, OpenAI Secure MCP Tunnel, and Streamable HTTP transports.
 - Remote HTTP through native HTTPS/mTLS or a trusted TLS-terminating reverse proxy.
@@ -77,7 +79,7 @@ Local Repo MCP never performs checkout, commit, reset, rebase, merge, pull, or p
 
 ## Permission modes
 
-| Mode | Read/list/search/status/diff | Apply validated patch | Run predefined tests |
+| Mode | Read/list/search/status/diff | Apply validated patch | Run allowlisted verification commands |
 | --- | --- | --- | --- |
 | `read` | Yes | No | No |
 | `write` | Yes | Yes | No |
@@ -94,8 +96,18 @@ Test mode executes repository code with the current operating-system user's perm
 | `repo_search_code` | Perform bounded fixed-string repository search. |
 | `repo_git_status` | Return filtered Git worktree status. |
 | `repo_git_diff` | Return a bounded, filtered Git diff. |
-| `repo_apply_patch` | Apply one validated unified text patch. |
-| `repo_run_test` | Run one predefined test command in `test` mode. |
+| `repo_apply_patch` | Atomically apply one validated unified text patch; one patch may modify multiple files, and any target failure prevents the whole patch from applying. |
+| `repo_run_test` | Run one or a bounded batch of allowlisted test/build/lint/check commands in `test` mode and return verifiable exit/output evidence. |
+
+`repo_run_test` keeps its historical tool name for client compatibility while delegating execution to the controlled command layer. The default allowlist includes `python_pytest`, `go_test`, `go_build`, `go_vet`, `node_test`, `node_build`, `node_lint`, `maven_test`, `maven_build`, `gradle_test`, and `gradle_build`.
+
+Use `command_key` for one command. Use `command_keys` for a sequential batch of at most 8 commands. The complete batch is allowlist-validated before the first command starts; `stop_on_failure=true` stops on the first failure, while `false` continues through the remaining commands. This is bounded in-call execution, not a queue, scheduler, or background task system.
+
+Every started command returns normalized evidence: command identity/kind, `status`, `success`, `exit_code` (with compatibility `returncode`), stdout/stderr plus truncation flags, and duration/timeout metadata. Timeout or output-limit termination remains a structured failed result with captured output. Command lifecycle metadata is logged, but stdout/stderr are not written to runtime/audit logs.
+
+All seven public tools publish typed MCP input and output contracts. The server relies on MCP SDK structured-output generation instead of client-specific schema patches; GUI connection verification rejects missing/invalid tool schemas before accepting a connection. Optional collection inputs are represented as optional parameters with non-null array schemas rather than nullable unions.
+
+`src/tools/contracts.py` is the single protocol-contract module for the public tool surface. Protocol regressions are tested against the actual `MCPServer.list_tools()` result, including the fixed seven-tool surface and presence of `outputSchema` for every tool.
 
 ## First-use workflow
 

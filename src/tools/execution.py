@@ -15,6 +15,35 @@ def _reason(exc: BaseException) -> str:
     return text[:500]
 
 
+def _audit_result_fields(result: object) -> dict[str, object]:
+    if not isinstance(result, dict):
+        return {}
+
+    payload = result
+    if payload.get("batch"):
+        items = payload.get("results")
+        if isinstance(items, list) and items and isinstance(items[0], dict):
+            payload = items[0]
+
+    fields: dict[str, object] = {}
+    code = payload.get("exit_code", payload.get("returncode"))
+    if code is not None:
+        fields["result_code"] = code
+    for key in ("command", "command_kind", "command_status"):
+        value = payload.get(key)
+        if value not in (None, ""):
+            fields[key] = value
+    for stream in ("stderr", "stdout"):
+        text = str(payload.get(stream, "")).strip()
+        if text:
+            fields[stream] = text[:2000]
+    if not fields.get("reason"):
+        reason = str(payload.get("stderr") or payload.get("stdout") or "").strip()
+        if reason:
+            fields["reason"] = reason[:500]
+    return fields
+
+
 def execute(
     context: RuntimeContext,
     *,
@@ -78,16 +107,10 @@ def execute(
         status, kind = "failed", "execution"
     else:
         status = result_status(result) if result_status is not None else "success"
-        extra = {}
-        if isinstance(result, dict) and "returncode" in result:
-            extra["result_code"] = result["returncode"]
-        audit_event(
-            context,
-            **record,
-            **extra,
-            status=status,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
+        completion = {**_audit_result_fields(result), **record}
+        completion["status"] = status
+        completion["duration_ms"] = int((time.monotonic() - started) * 1000)
+        audit_event(context, **completion)
         return result
 
     assert failure is not None

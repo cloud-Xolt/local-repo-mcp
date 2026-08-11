@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import os
 import struct
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,17 +25,28 @@ from gui.theme import (
 
 def _pid_running(pid: int) -> bool:
     if os.name == "nt":
-        result = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=5,
-            check=False,
-            shell=False,
-        )
-        return f'"{pid}"' in result.stdout
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+        process_query_limited_information = 0x1000
+        still_active = 259
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
 
     try:
         os.kill(pid, 0)
@@ -137,5 +147,6 @@ def test_app_does_not_leak_customtkinter_blue_theme() -> None:
     assert "set_default_color_theme" not in inspect.getsource(LocalRepoMCPApp.__init__)
     shell_source = inspect.getsource(LocalRepoMCPApp._build_shell)
     assert 'fg_color=COLORS["surface_alt"]' in shell_source
-    assert 'button_color=COLORS["border_strong"]' in shell_source
-    assert 'button_hover_color=COLORS["muted"]' in shell_source
+    assert 'unselected_color=COLORS["surface_alt"]' in shell_source
+    assert 'selected_color=COLORS["accent_soft"]' in shell_source
+    assert 'unselected_hover_color=COLORS["surface_hover"]' in shell_source
