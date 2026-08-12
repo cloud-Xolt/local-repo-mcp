@@ -19,7 +19,6 @@ sessions.json
 .DS_Store
 Thumbs.db
 node_modules/
-*.pdf
 *.invalid.*.json
 !README.md
 !README.zh-CN.md
