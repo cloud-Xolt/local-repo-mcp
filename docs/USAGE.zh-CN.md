@@ -260,7 +260,7 @@ HTTP_PROXY_TRUSTED_IPS=10.0.0.0/8
 3. 单命令使用允许的 `command_key`；批量验证使用 `command_keys`，并按需设置 `stop_on_failure`；
 4. 检查每个命令返回的 `status`、`exit_code`、stdout、stderr、耗时和输出截断标记。
 
-Local Repo MCP 不会自动提交或推送修改。
+Local Repo MCP 不会自动推送修改。本地 commit 仅在 GUI / `ALLOW_GIT_COMMIT` 显式开启时可用。
 
 ## 11. 使用日志中心
 

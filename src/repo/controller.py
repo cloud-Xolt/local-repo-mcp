@@ -8,7 +8,7 @@ from typing import Callable
 from repo.changes import ChangeRecord, parse_name_status_z, parse_porcelain_v1_z
 from repo.git import parse_numstat_z
 from repo.worktree import branch_name
-from security.guard import is_read_denied
+from security.guard import is_read_denied, is_write_denied
 
 
 class GitController:
@@ -219,3 +219,128 @@ class GitController:
             ),
             "git apply failed",
         )
+
+    _MAX_COMMIT_MESSAGE_BYTES = 4_000
+    _MAX_COMMIT_PATHS = 200
+
+    def _changed_paths(self) -> list[str]:
+        result = self.runner(
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+        )
+        records = parse_porcelain_v1_z(
+            self._require_ok(result, "git status failed")
+        )
+        paths: list[str] = []
+        seen: set[str] = set()
+        for record in records:
+            for path in record.paths:
+                if path in seen:
+                    continue
+                seen.add(path)
+                paths.append(path)
+        return paths
+
+    def _staged_paths(self) -> list[str]:
+        result = self.runner(
+            [
+                "diff",
+                "--cached",
+                "--name-only",
+                "-z",
+                "--diff-filter=ACDMRTUXB",
+            ]
+        )
+        raw = self._require_ok(result, "git diff --cached failed")
+        return [path for path in raw.split("\0") if path]
+
+    def commit_paths(
+        self,
+        message: str,
+        paths: list[str] | None = None,
+    ) -> dict:
+        """Stage allowlisted paths and create one local commit.
+
+        Does not push, amend, reset, checkout, or skip hooks.
+        """
+        self._check_no_interrupted_operation()
+        text = message.strip()
+        if not text:
+            raise ValueError("commit message is required")
+        if "\x00" in text:
+            raise ValueError("commit message contains NUL")
+        if len(text.encode("utf-8")) > self._MAX_COMMIT_MESSAGE_BYTES:
+            raise ValueError(
+                f"commit message exceeds {self._MAX_COMMIT_MESSAGE_BYTES} bytes"
+            )
+
+        changed = self._changed_paths()
+        changed_set = set(changed)
+        if paths is None:
+            selected = [path for path in changed if not is_write_denied(path)]
+        else:
+            selected = []
+            seen: set[str] = set()
+            for raw in paths:
+                path = raw.replace("\\", "/").strip().strip("/")
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                selected.append(path)
+            if not selected:
+                raise ValueError("paths must not be empty when provided")
+            if len(selected) > self._MAX_COMMIT_PATHS:
+                raise ValueError(
+                    f"too many paths: {len(selected)} > {self._MAX_COMMIT_PATHS}"
+                )
+            denied = [path for path in selected if is_write_denied(path)]
+            if denied:
+                raise PermissionError(
+                    "path is not allowed for commit: " + ", ".join(denied)
+                )
+            missing = [path for path in selected if path not in changed_set]
+            if missing:
+                raise ValueError(
+                    "path has no pending changes: " + ", ".join(missing)
+                )
+
+        if not selected:
+            raise ValueError("nothing to commit")
+        if len(selected) > self._MAX_COMMIT_PATHS:
+            raise ValueError(
+                f"too many paths: {len(selected)} > {self._MAX_COMMIT_PATHS}"
+            )
+
+        blocked_staged = [
+            path for path in self._staged_paths() if is_write_denied(path)
+        ]
+        if blocked_staged:
+            raise PermissionError(
+                "unstage sensitive paths before commit: "
+                + ", ".join(sorted(set(blocked_staged)))
+            )
+
+        pathspec = "\0".join(selected) + "\0"
+        self._require_ok(
+            self.runner(
+                ["add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                input_text=pathspec,
+            ),
+            "git add failed",
+        )
+        self._require_ok(
+            self.runner(["commit", "-F", "-"], input_text=text + "\n"),
+            "git commit failed",
+        )
+        commit = self._require_ok(
+            self.runner(["rev-parse", "HEAD"]),
+            "git rev-parse failed",
+        ).strip()
+        return {
+            "committed": True,
+            "commit": commit,
+            "branch": self.current_branch(),
+            "paths": selected,
+            "message": text,
+            "warning": self.branch_warning(),
+            "hidden_paths": sum(1 for path in changed if is_write_denied(path)),
+        }

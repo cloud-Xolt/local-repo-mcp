@@ -29,6 +29,7 @@ class RuntimeContext:
     max_search_results: int
     max_output_bytes: int
     allow_dirty_worktree: bool
+    allow_git_commit: bool
     filesystem: RepoFilesystem
     git: GitController
     scanner: SecretScanner
@@ -127,6 +128,9 @@ def build_context(mcp: MCPServer) -> RuntimeContext:
         max_output_bytes=max_output,
         allow_dirty_worktree=_parse_bool(
             os.environ.get("ALLOW_DIRTY_WORKTREE", ""), default=False
+        ),
+        allow_git_commit=_parse_bool(
+            os.environ.get("ALLOW_GIT_COMMIT", ""), default=False
         ),
         filesystem=RepoFilesystem(repo_root, max_file),
         git=GitController(repo_root, runner, max_output),

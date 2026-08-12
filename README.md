@@ -61,7 +61,7 @@ See `docs/DEPLOYMENT.md` and `docs/SECURITY.md`.
 python -m pytest -q -p no:cacheprovider
 ```
 
-Local Repo MCP never performs checkout, commit, reset, rebase, merge, pull, or push.
+Local Repo MCP never performs checkout, reset, rebase, merge, pull, push, or amend. Local `git commit` is off by default and requires an explicit GUI/`ALLOW_GIT_COMMIT` enablement in write or test mode.
 
 ## Documentation
 
@@ -79,11 +79,11 @@ Local Repo MCP never performs checkout, commit, reset, rebase, merge, pull, or p
 
 ## Permission modes
 
-| Mode | Read/list/search/status/diff | Apply validated patch | Run allowlisted verification commands |
-| --- | --- | --- | --- |
-| `read` | Yes | No | No |
-| `write` | Yes | Yes | No |
-| `test` | Yes | Yes | Yes |
+| Mode | Read/list/search/status/diff | Apply validated patch | Optional local commit | Run allowlisted verification commands |
+| --- | --- | --- | --- | --- |
+| `read` | Yes | No | No | No |
+| `write` | Yes | Yes | Yes when enabled | No |
+| `test` | Yes | Yes | Yes when enabled | Yes |
 
 Test mode executes repository code with the current operating-system user's permissions. It is not a sandbox and must be enabled only for trusted repositories.
 
@@ -97,6 +97,7 @@ Test mode executes repository code with the current operating-system user's perm
 | `repo_git_status` | Return filtered Git worktree status. |
 | `repo_git_diff` | Return a bounded, filtered Git diff. |
 | `repo_apply_patch` | Atomically apply one validated unified text patch; one patch may modify multiple files, and any target failure prevents the whole patch from applying. |
+| `repo_git_commit` | Create one local Git commit for allowlisted pending changes when `ALLOW_GIT_COMMIT` is enabled; optional `paths` limits the staged set. |
 | `repo_run_test` | Run one or a bounded batch of allowlisted test/build/lint/check commands in `test` mode and return verifiable exit/output evidence. |
 
 `repo_run_test` keeps its historical tool name for client compatibility while delegating execution to the controlled command layer. The default allowlist includes `python_pytest`, `go_test`, `go_build`, `go_vet`, `node_test`, `node_build`, `node_lint`, `maven_test`, `maven_build`, `gradle_test`, and `gradle_build`.
@@ -105,9 +106,9 @@ Use `command_key` for one command. Use `command_keys` for a sequential batch of 
 
 Every started command returns normalized evidence: command identity/kind, `status`, `success`, `exit_code` (with compatibility `returncode`), stdout/stderr plus truncation flags, and duration/timeout metadata. Timeout or output-limit termination remains a structured failed result with captured output. Command lifecycle metadata is logged, but stdout/stderr are not written to runtime/audit logs.
 
-All seven public tools publish typed MCP input and output contracts. The server relies on MCP SDK structured-output generation instead of client-specific schema patches; GUI connection verification rejects missing/invalid tool schemas before accepting a connection. Optional collection inputs are represented as optional parameters with non-null array schemas rather than nullable unions.
+All eight public tools publish typed MCP input and output contracts. The server relies on MCP SDK structured-output generation instead of client-specific schema patches; GUI connection verification rejects missing/invalid tool schemas before accepting a connection. Optional collection inputs are represented as optional parameters with non-null array schemas rather than nullable unions.
 
-`src/tools/contracts.py` is the single protocol-contract module for the public tool surface. Protocol regressions are tested against the actual `MCPServer.list_tools()` result, including the fixed seven-tool surface and presence of `outputSchema` for every tool.
+`src/tools/contracts.py` is the single protocol-contract module for the public tool surface. Protocol regressions are tested against the actual `MCPServer.list_tools()` result, including the fixed eight-tool surface and presence of `outputSchema` for every tool.
 
 ## First-use workflow
 

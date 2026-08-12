@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from mcp.server import MCPServer
 
+from tools.commits import register_commit_tools
 from tools.contracts import EXPECTED_TOOL_NAMES, contract_problems, schema_value
 from tools.patches import register_patch_tools
 from tools.reads import register_read_tools
@@ -16,6 +17,7 @@ def _listed_tools():
     context = SimpleNamespace(mcp=server)
     register_read_tools(context)  # type: ignore[arg-type]
     register_patch_tools(context)  # type: ignore[arg-type]
+    register_commit_tools(context)  # type: ignore[arg-type]
     register_test_tools(context)  # type: ignore[arg-type]
     return asyncio.run(server.list_tools())
 

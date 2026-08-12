@@ -27,6 +27,7 @@ TOOL_VISUALS = (
     ToolVisual("repo_git_status", "查看 Git 状态", "Read Git status", "查看经过敏感路径过滤的工作区状态", "Read filtered worktree status", "#29966F", "branch"),
     ToolVisual("repo_git_diff", "查看 Git 差异", "Read Git diff", "查看受限且经过过滤的代码差异", "Read bounded and filtered diffs", "#C47A22", "diff"),
     ToolVisual("repo_apply_patch", "应用代码修改", "Apply code changes", "应用经过校验的统一文本修改", "Apply validated unified text changes", "#D65A45", "patch"),
+    ToolVisual("repo_git_commit", "提交本地更改", "Commit local changes", "在启用时创建本地 Git commit", "Create a local Git commit when enabled", "#0F766E", "commit"),
     ToolVisual("repo_run_test", "运行验证命令", "Run verification commands", "运行白名单 test/build/lint/check 命令", "Run allowlisted test/build/lint/check commands", "#B54AA5", "test"),
 )
 VISUAL_BY_NAME = {item.name: item for item in TOOL_VISUALS}
@@ -91,6 +92,10 @@ class ToolIcon(Canvas):
             self._rect(10, 10, 32, 32)
             self._line(21, 15, 21, 27)
             self._line(15, 21, 27, 21)
+        elif kind == "commit":
+            self.create_oval(14, 10, 28, 24, outline=self.visual.color, width=2)
+            self._line(21, 24, 21, 34, width=3)
+            self._line(16, 34, 26, 34)
         elif kind == "test":
             self._line(16, 9, 26, 9)
             self._line(18, 9, 18, 18, 11, 31)

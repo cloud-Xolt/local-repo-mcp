@@ -97,6 +97,7 @@ class AppConfig:
     max_search_results: int = 50
     max_output_bytes: int = 20_000
     allow_dirty_worktree: bool = False
+    allow_git_commit: bool = False
     audit_log: str = field(default_factory=_default_audit_log)
     mcp_log: str = field(default_factory=_default_mcp_log)
     log_max_bytes: int = 5_000_000
@@ -271,6 +272,7 @@ class AppConfig:
             "MAX_SEARCH_RESULTS": str(self.max_search_results),
             "MAX_OUTPUT_BYTES": str(self.max_output_bytes),
             "ALLOW_DIRTY_WORKTREE": str(self.allow_dirty_worktree).lower(),
+            "ALLOW_GIT_COMMIT": str(self.allow_git_commit).lower(),
             "AUDIT_REQUIRED": str(self.mcp_mode in {"write", "test"}).lower(),
             "AUDIT_LOG": self.audit_log.strip(),
             "MCP_LOG": self.mcp_log.strip(),

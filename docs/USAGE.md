@@ -260,7 +260,7 @@ A typical test workflow is:
 3. use an allowed `command_key` for one command, or `command_keys` for a batch, with `stop_on_failure` as needed;
 4. review each command's `status`, `exit_code`, stdout, stderr, duration, and truncation indicators.
 
-Local Repo MCP never commits or pushes the resulting changes.
+Local Repo MCP never pushes the resulting changes. Local commit remains off unless `ALLOW_GIT_COMMIT` / the GUI switch is enabled.
 
 ## 11. Use the log center
 

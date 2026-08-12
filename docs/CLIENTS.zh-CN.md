@@ -28,7 +28,7 @@ Local Repo MCP 要求所选目录是 Git 工作区。新建项目时，先创建
 - 查看经过过滤的 Git 状态和 Diff；
 - 在 `test` 模式运行单个或有界顺序批量的白名单验证命令，并获得可核验执行结果。
 
-Local Repo MCP 不开放无限制 Shell，也不允许任意 checkout、commit、reset、rebase、merge、pull 或 push 操作。
+Local Repo MCP 不开放无限制 Shell，也不允许任意 checkout、reset、rebase、merge、pull、push 或 amend。本地 commit 默认关闭，需显式开启。
 
 ## 接入 ChatGPT
 
@@ -43,7 +43,7 @@ Secure MCP Tunnel 页面负责管理 Tunnel Profile、仅保存在进程内存�
 
 ## 接入其他 MCP 客户端
 
-其他兼容 MCP 的客户端使用同一个服务端实现和相同的 7 个 MCP 工具。
+其他兼容 MCP 的客户端使用同一个服务端实现和相同的 8 个 MCP 工具。
 
 ### STDIO
 
@@ -82,6 +82,7 @@ STDIO 适用于：
 | `repo_git_status` | 读取经过过滤的 Git 状态。 |
 | `repo_git_diff` | 读取受大小限制并经过过滤的 Git Diff。 |
 | `repo_apply_patch` | 原子应用统一文本 Patch，可一次修改多个文件。 |
+| `repo_git_commit` | 显式开启后，为允许的改动创建一次本地 commit。 |
 | `repo_run_test` | 在 `test` 模式运行单个或有界批量的白名单验证命令，并返回退出码与 stdout/stderr。 |
 
 所有客户端都受到相同的以下控制：

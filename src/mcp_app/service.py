@@ -10,6 +10,7 @@ from mcp.server import MCPServer
 from audit.logger import AuditLogger
 from mcp_app.http_policy import HttpSecurityMiddleware, HttpSecuritySettings
 from mcp_app.version import VERSION
+from tools.commits import register_commit_tools
 from tools.patches import register_patch_tools
 from tools.reads import register_read_tools
 from tools.runtime import audit_event, build_context
@@ -19,6 +20,7 @@ mcp = MCPServer("Local Repo MCP", version=VERSION)
 context = build_context(mcp)
 register_read_tools(context)
 register_patch_tools(context)
+register_commit_tools(context)
 register_test_tools(context)
 
 

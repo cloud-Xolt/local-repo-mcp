@@ -153,9 +153,9 @@ def test_connection_state_drives_reconnect_label() -> None:
 
 
 def test_tool_visual_catalog_has_distinct_theme_tokens() -> None:
-    assert len(TOOL_VISUALS) == 7
-    assert len({item.name for item in TOOL_VISUALS}) == 7
-    assert len({item.color for item in TOOL_VISUALS}) == 7
+    assert len(TOOL_VISUALS) == 8
+    assert len({item.name for item in TOOL_VISUALS}) == 8
+    assert len({item.color for item in TOOL_VISUALS}) == 8
     assert all(not hasattr(item, "soft_light") for item in TOOL_VISUALS)
     assert all(not hasattr(item, "soft_dark") for item in TOOL_VISUALS)
     assert all(item.icon for item in TOOL_VISUALS)

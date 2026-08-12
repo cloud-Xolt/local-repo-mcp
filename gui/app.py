@@ -157,6 +157,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self.log_max_kb_var = ctk.StringVar(value=str(cfg.log_max_bytes // 1000))
         self.log_backup_var = ctk.StringVar(value=str(cfg.log_backup_count))
         self.dirty_var = ctk.BooleanVar(value=cfg.allow_dirty_worktree)
+        self.git_commit_var = ctk.BooleanVar(value=cfg.allow_git_commit)
         self.tunnel_path_var = ctk.StringVar(value=cfg.tunnel_client_path)
         self.tunnel_id_var = ctk.StringVar(value=cfg.tunnel_id)
         self.tunnel_profile_var = ctk.StringVar(value=cfg.tunnel_profile)
@@ -889,6 +890,29 @@ class LocalRepoMCPApp(ctk.CTk):
             ).pack(anchor="w", padx=12, pady=(0, 11))
             warning.grid_configure(row=7)
 
+            commit_box = ctk.CTkFrame(
+                advanced,
+                fg_color=COLORS["warning_soft"],
+                corner_radius=10,
+            )
+            commit_box.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            ctk.CTkSwitch(
+                commit_box,
+                text=self.t("git_commit"),
+                variable=self.git_commit_var,
+                progress_color=COLORS["warning"],
+                button_color=COLORS["surface"],
+                button_hover_color=COLORS["surface"],
+                text_color=COLORS["text"],
+                font=ctk.CTkFont(size=FONT_BODY),
+            ).pack(anchor="w", padx=12, pady=(11, 3))
+            ctk.CTkLabel(
+                commit_box,
+                text=self.t("git_commit_warning"),
+                text_color=COLORS["muted"],
+                font=ctk.CTkFont(size=FONT_SMALL),
+            ).pack(anchor="w", padx=12, pady=(0, 11))
+
         action_bar = ctk.CTkFrame(
             page,
             fg_color=COLORS["surface"],
@@ -1079,6 +1103,7 @@ class LocalRepoMCPApp(ctk.CTk):
             (
                 ("↳", self.t("cap_read")),
                 ("±", self.t("cap_patch")),
+                ("●", self.t("cap_commit")),
                 ("✓", self.t("cap_test")),
                 ("⌁", self.t("cap_transport")),
             )
@@ -1195,6 +1220,7 @@ class LocalRepoMCPApp(ctk.CTk):
                 max_search_results=int(self.max_search_var.get()),
                 max_output_bytes=int(self.max_output_var.get()) * 1000,
                 allow_dirty_worktree=self.dirty_var.get(),
+                allow_git_commit=self.git_commit_var.get(),
                 audit_log=self.audit_var.get().strip(),
                 mcp_log=self.mcp_log_var.get().strip(),
                 log_max_bytes=int(self.log_max_kb_var.get()) * 1000,

@@ -245,10 +245,11 @@ def test_command_start_log_failure_terminates_child(tmp_path: Path) -> None:
     assert not marker.exists()
 
 
-def test_mcp_surface_remains_seven_tools_with_batch_command_schema() -> None:
+def test_mcp_surface_remains_eight_tools_with_batch_command_schema() -> None:
     import inspect
     from types import SimpleNamespace
 
+    from tools.commits import register_commit_tools
     from tools.patches import register_patch_tools
     from tools.reads import register_read_tools
     from tools.tests import register_test_tools
@@ -267,11 +268,14 @@ def test_mcp_surface_remains_seven_tools_with_batch_command_schema() -> None:
     context = SimpleNamespace(mcp=mcp)
     register_read_tools(context)
     register_patch_tools(context)
+    register_commit_tools(context)
     register_test_tools(context)
 
     assert set(mcp.tools) == {
         "repo_list_files", "repo_read_file", "repo_search_code",
-        "repo_git_status", "repo_git_diff", "repo_apply_patch", "repo_run_test",
+        "repo_git_status", "repo_git_diff", "repo_apply_patch", "repo_git_commit", "repo_run_test",
     }
     parameters = inspect.signature(mcp.tools["repo_run_test"]).parameters
     assert set(parameters) == {"command_key", "command_keys", "timeout_seconds", "stop_on_failure"}
+    commit_parameters = inspect.signature(mcp.tools["repo_git_commit"]).parameters
+    assert set(commit_parameters) == {"message", "paths"}

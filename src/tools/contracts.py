@@ -17,6 +17,7 @@ EXPECTED_TOOL_NAMES = frozenset(
         "repo_git_status",
         "repo_git_diff",
         "repo_apply_patch",
+        "repo_git_commit",
         "repo_run_test",
     }
 )
@@ -86,6 +87,17 @@ class ApplyPatchResult(TypedDict):
     truncated: bool
     result_hash: str
     hidden_files: int
+
+
+class GitCommitResult(TypedDict):
+    committed: bool
+    commit: str
+    branch: str
+    paths: list[str]
+    message: str
+    warning: str | None
+    hidden_paths: int
+    repository: RepositoryRef
 
 
 class ImageMetadata(TypedDict):

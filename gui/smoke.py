@@ -24,7 +24,7 @@ def main() -> None:
         raise RuntimeError(f"GUI composition root is incomplete: {missing}")
     if not callable(log_workspace.build) or not callable(server_workspace.build):
         raise RuntimeError("GUI workspaces are not callable")
-    if len(TOOL_VISUALS) != 7 or len({item.name for item in TOOL_VISUALS}) != 7:
+    if len(TOOL_VISUALS) != 8 or len({item.name for item in TOOL_VISUALS}) != 8:
         raise RuntimeError("tool visual catalog is incomplete")
     for name in ("app-icon-16.png", "app-icon-32.png", "app-icon-64.png", "app-icon.ico"):
         if not (ASSETS / name).is_file():

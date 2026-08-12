@@ -28,7 +28,7 @@ Within the selected permission mode, ChatGPT can:
 - review filtered Git status and diff output;
 - run one or a bounded sequential batch of allowlisted verification commands in `test` mode and receive verifiable execution evidence.
 
-Local Repo MCP does not expose an unrestricted shell. It also does not allow arbitrary checkout, commit, reset, rebase, merge, pull, or push operations.
+Local Repo MCP does not expose an unrestricted shell. It also does not allow arbitrary checkout, reset, rebase, merge, pull, push, or amend. Local commit is off by default and requires explicit enablement.
 
 ## Connect ChatGPT
 
@@ -43,7 +43,7 @@ For Streamable HTTP, Bearer authentication is always required. Remote deployment
 
 ## Connect other MCP clients
 
-Other MCP-compatible clients use the same server implementation and the same seven MCP tools.
+Other MCP-compatible clients use the same server implementation and the same eight MCP tools.
 
 ### STDIO
 
@@ -82,6 +82,7 @@ Client identity does not change the server capability set. ChatGPT and other MCP
 | `repo_git_status` | Read filtered Git status. |
 | `repo_git_diff` | Read a bounded, filtered Git diff. |
 | `repo_apply_patch` | Atomically apply a unified text patch that may modify multiple files. |
+| `repo_git_commit` | Create one local commit for allowlisted changes when explicitly enabled. |
 | `repo_run_test` | Run one or a bounded batch of allowlisted verification commands in `test` mode and return exit code plus stdout/stderr. |
 
 Every client is subject to the same:

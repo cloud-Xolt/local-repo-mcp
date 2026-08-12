@@ -6,7 +6,7 @@ All user paths are resolved relative to the configured repository. Absolute path
 
 ## Mutation model
 
-Only `repo_apply_patch` can modify repository files. The server validates patch structure, all target paths, existing target changes, credential-like additions, and `git apply --check` before applying. One unified patch may contain multiple files and is applied as one locked Git operation, so a validation/apply failure prevents partial target changes. A cross-process advisory lock in the Git common directory serializes mutations across GUI, Tunnel, HTTP, and system services.
+Only `repo_apply_patch` can modify repository files. Optional `repo_git_commit` can create a local commit when explicitly enabled; it never pushes. The server validates patch structure, all target paths, existing target changes, credential-like additions, and `git apply --check` before applying. One unified patch may contain multiple files and is applied as one locked Git operation, so a validation/apply failure prevents partial target changes. A cross-process advisory lock in the Git common directory serializes mutations across GUI, Tunnel, HTTP, and system services.
 
 ## HTTP boundary
 

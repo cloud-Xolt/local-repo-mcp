@@ -13,6 +13,7 @@ TOOL_TITLES = {
     "repo_git_status": ("查看 Git 状态", "Read Git status"),
     "repo_git_diff": ("查看 Git 差异", "Read Git diff"),
     "repo_apply_patch": ("应用 Patch", "Apply patch"),
+    "repo_git_commit": ("Git 提交", "Git commit"),
     "repo_run_test": ("运行验证命令", "Run verification commands"),
 }
 EVENT_TITLES = {
