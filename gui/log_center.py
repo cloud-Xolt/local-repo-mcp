@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -189,14 +189,48 @@ def event_title(event: dict[str, Any], language: str) -> str:
     return str(event.get("message") or "Event")
 
 
+def _parse_iso_timestamp(iso: str) -> datetime | None:
+    text = iso.strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def event_time(event: dict[str, Any]) -> str:
     iso = str(event.get("timestamp_iso", ""))
-    if iso:
-        return iso.replace("T", " ")[:23]
+    parsed = _parse_iso_timestamp(iso)
+    if parsed is not None:
+        return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     value = _timestamp(event)
     if not value:
         return "---- -- -- --:--:--"
     return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _display_target(event: dict[str, Any]) -> str:
+    target = str(event.get("target") or event.get("repository") or "")
+    targets = event.get("targets")
+    if not target and isinstance(targets, list) and targets:
+        target = ", ".join(str(item) for item in targets[:2])
+        if len(targets) > 2:
+            target += f" +{len(targets) - 2}"
+    return target
+
+
+def _display_reason(event: dict[str, Any], *, limit: int = 120) -> str:
+    reason = str(event.get("reason", "")).strip().replace("\n", " | ")
+    if not reason:
+        return ""
+    if len(reason) <= limit:
+        return reason
+    return reason[: limit - 1] + "…"
 
 
 def event_row(event: dict[str, Any], language: str) -> str:
@@ -210,13 +244,9 @@ def event_row(event: dict[str, Any], language: str) -> str:
         elif kind == "policy":
             status_text = "策略拒绝" if language == "zh" else "Policy denied"
     source = str(event.get("source", "mcp")).upper()[:6]
-    target = str(event.get("target") or event.get("repository") or "")
-    targets = event.get("targets")
-    if not target and isinstance(targets, list) and targets:
-        target = ", ".join(str(item) for item in targets[:2])
-        if len(targets) > 2:
-            target += f" +{len(targets) - 2}"
-    suffix = f"  ·  {target}" if target else ""
+    target = _display_target(event)
+    suffix_parts = [part for part in (target, _display_reason(event)) if part]
+    suffix = f"  ·  {'  ·  '.join(suffix_parts)}" if suffix_parts else ""
     return f"{event_time(event)[11:19]}  {label[2]} {status_text:<4}  {source:<6}  {event_title(event, language)}{suffix}"
 
 
@@ -234,6 +264,13 @@ def event_details(event: dict[str, Any], language: str, *, raw: bool = False) ->
     ]
     for key, labels in (
         ("target", ("目标", "Target")),
+        ("limit", ("数量上限", "Limit")),
+        ("file_count", ("文件数", "File count")),
+        ("match_count", ("匹配数", "Match count")),
+        ("backend", ("搜索后端", "Search backend")),
+        ("truncated", ("结果截断", "Truncated")),
+        ("respect_gitignore", ("遵守 .gitignore", "Respect .gitignore")),
+        ("max_file_bytes", ("文件大小上限", "Max file bytes")),
         ("command_key", ("命令键", "Command key")),
         ("command_kind", ("命令类型", "Command kind")),
         ("command_status", ("命令状态", "Command status")),
@@ -261,22 +298,64 @@ def event_details(event: dict[str, Any], language: str, *, raw: bool = False) ->
                     value = "\n  " + rendered.replace("\n", "\n  ")
                 else:
                     value = rendered
+            elif key in {"respect_gitignore", "truncated"}:
+                value = _format_bool(value, language)
             fields.append((labels, f"{value} ms" if key == "duration_ms" else str(value)))
     targets = event.get("targets")
     if isinstance(targets, list) and targets:
         fields.append((("目标", "Targets"), "\n  ".join(str(item) for item in targets)))
+    for key, labels in (
+        ("include", ("包含", "Include")),
+        ("exclude", ("排除", "Exclude")),
+    ):
+        value = event.get(key)
+        if isinstance(value, list) and value:
+            fields.append((labels, ", ".join(str(item) for item in value)))
     lines: list[str] = []
     for labels, value in fields:
         lines.extend((_localized(labels, language), f"  {value}", ""))
     return "\n".join(lines).rstrip()
 
 
-def _compact_details(event: dict[str, Any]) -> str:
+def _format_bool(value: object, language: str) -> str:
+    if value is True:
+        return "是" if language == "zh" else "Yes"
+    if value is False:
+        return "否" if language == "zh" else "No"
+    return str(value)
+
+
+def _compact_details(event: dict[str, Any], language: str = "zh") -> str:
     details: list[str] = []
     if event.get("command_key"):
         command = str(event["command_key"])
         kind = str(event.get("command_kind", "")).upper()
         details.append(f"{kind} {command}".strip())
+    if event.get("respect_gitignore") is False:
+        details.append("NO GITIGNORE" if language != "zh" else "忽略 .gitignore")
+    for key, label in (("include", "include"), ("exclude", "exclude")):
+        values = event.get(key)
+        if isinstance(values, list) and values:
+            rendered = ", ".join(str(item) for item in values[:3])
+            if len(values) > 3:
+                rendered += f" +{len(values) - 3}"
+            details.append(f"{label}={rendered}")
+    if isinstance(event.get("file_count"), int):
+        details.append(
+            f"{event['file_count']} files"
+            if language != "zh"
+            else f"{event['file_count']} 个文件"
+        )
+    if isinstance(event.get("match_count"), int):
+        details.append(
+            f"{event['match_count']} matches"
+            if language != "zh"
+            else f"{event['match_count']} 条匹配"
+        )
+    if event.get("backend"):
+        details.append(str(event["backend"]))
+    if event.get("truncated") is True:
+        details.append("truncated" if language != "zh" else "已截断")
     for key in ("transport", "mode"):
         value = event.get(key)
         if value:
@@ -291,7 +370,15 @@ def _compact_details(event: dict[str, Any]) -> str:
         if len(targets) > 3:
             visible += f" +{len(targets) - 3}"
         details.append(visible)
-    if event.get("error_type"):
+    reason = _display_reason(event, limit=200)
+    if reason and str(event.get("status", "")).lower() in {
+        "failed",
+        "error",
+        "denied",
+        "unavailable",
+    }:
+        details.append(reason)
+    elif event.get("error_type"):
         details.append(str(event["error_type"]))
     message = str(event.get("message", "")).strip()
     if message and event.get("event") in {"process_output", "invalid_log_record"}:
@@ -315,7 +402,7 @@ def format_events(
         row = event_row(event, language)
         date = event_time(event)[:10]
         rendered.append(f"{date}  {row}" if not date.startswith("----") else row)
-        details = _compact_details(event)
+        details = _compact_details(event, language)
         if details:
             rendered.append(f"    {details}")
         rendered.append("")

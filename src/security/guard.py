@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import fnmatch
-import os
 from pathlib import Path
 
 READ_DENY_PATTERNS = (
@@ -38,7 +37,6 @@ READ_DENY_PATTERNS = (
 )
 
 WRITE_DENY_PATTERNS = (*READ_DENY_PATTERNS, ".github/workflows", ".github/workflows/**")
-SKIP_DIRECTORIES = {".git", "node_modules", "vendor", ".venv", "venv", "__pycache__", "dist", "build"}
 
 
 def _normalize(path: str) -> str:
@@ -109,33 +107,6 @@ def validate_write_path(repo_root: Path, user_path: str) -> tuple[Path, str]:
         raise PermissionError(f"write path is blocked: {relative}")
     _reject_hardlinked_file(target)
     return target, relative
-
-
-def list_files(base: Path, repo_root: Path, limit: int) -> tuple[list[str], bool]:
-    results: list[str] = []
-    for root, dirs, files in os.walk(base, followlinks=False):
-        root_path = Path(root)
-        dirs[:] = [
-            name
-            for name in dirs
-            if name not in SKIP_DIRECTORIES and not (root_path / name).is_symlink()
-        ]
-        for name in files:
-            item = root_path / name
-            if item.is_symlink():
-                continue
-            try:
-                if item.stat().st_nlink > 1:
-                    continue
-            except OSError:
-                continue
-            relative = item.relative_to(repo_root).as_posix()
-            if is_read_denied(relative):
-                continue
-            results.append(relative)
-            if len(results) >= limit:
-                return results, True
-    return results, False
 
 
 def read_text_file(path: Path, max_bytes: int) -> tuple[str, int]:

@@ -18,6 +18,7 @@ from mcp_app.version import VERSION
 from repo.controller import GitController
 from repo.git import run_git
 from repo.lock import RepositoryLock
+from repo.file_scope import TraversalOptions
 from repo.search import search_repository
 from security.guard import validate_read_path
 
@@ -88,7 +89,13 @@ def test_python_search_fallback_is_bounded_and_filters_sensitive_files(
     (tmp_path / "app.py").write_text("needle\nneedle\n", encoding="utf-8")
     (tmp_path / ".env").write_text("needle\n", encoding="utf-8")
     monkeypatch.setattr(search_module.shutil, "which", lambda name: None)
-    result = search_repository("needle", tmp_path, 1, 10_000, 10_000)
+    result = search_repository(
+        "needle",
+        tmp_path,
+        TraversalOptions(path=".", limit=None, max_file_bytes=10_000),
+        10_000,
+        1,
+    )
     assert result["backend"] == "python"
     assert result["truncated"] is True
     assert [item["path"] for item in result["matches"]] == ["app.py"]

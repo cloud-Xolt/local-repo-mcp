@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 from audit.logger import AuditLogger
 from gui.config import AppConfig
-from gui.log_center import format_jsonl, read_tail_lines
+from gui.log_center import event_time, format_jsonl, read_tail_lines
 from gui.processes import ManagedProcess
 
 
@@ -22,6 +23,15 @@ def test_tail_reader_is_bounded_and_returns_latest_lines(tmp_path: Path) -> None
     assert len(lines) == 10
     assert json.loads(lines[0])["index"] == 990
     assert json.loads(lines[-1])["index"] == 999
+
+
+def test_event_time_converts_utc_iso_to_local_time() -> None:
+    iso = "2026-08-13T11:32:00.456+00:00"
+    event = {"timestamp_iso": iso, "timestamp": 0}
+    expected = (
+        datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    )
+    assert event_time(event) == expected
 
 
 def test_readable_formatter_localizes_and_shows_target() -> None:

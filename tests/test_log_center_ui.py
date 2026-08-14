@@ -11,6 +11,7 @@ from gui.log_center import (
     event_details,
     event_row,
     filter_events,
+    format_events,
     merge_events,
     parse_jsonl,
     parse_process_lines,
@@ -69,6 +70,61 @@ def test_log_search_matches_targets_and_errors() -> None:
     assert filter_events(events, query="test_app.py")
     assert filter_events(events, query="PatchConflict", level="ERROR")
     assert not filter_events(events, level="INFO")
+
+
+def test_list_and_search_audit_fields_are_rendered() -> None:
+    list_event = {
+        "timestamp": 1,
+        "status": "success",
+        "tool": "repo_list_files",
+        "target": "src",
+        "limit": 200,
+        "respect_gitignore": True,
+        "max_file_bytes": 100_000,
+        "include": ["*.go"],
+        "exclude": ["vendor/**"],
+        "file_count": 12,
+        "truncated": False,
+        "source": "mcp",
+    }
+    search_event = {
+        "timestamp": 2,
+        "status": "success",
+        "tool": "repo_search_code",
+        "target_hash": "abc123",
+        "limit": 50,
+        "respect_gitignore": False,
+        "match_count": 3,
+        "backend": "ripgrep",
+        "source": "mcp",
+    }
+
+    list_details = event_details(list_event, "zh")
+    search_text = format_events([search_event], "zh")
+
+    assert "包含" in list_details
+    assert "*.go" in list_details
+    assert "12" in list_details
+    assert "忽略 .gitignore" in search_text
+    assert "ripgrep" in search_text
+    assert "3 条匹配" in search_text
+
+
+def test_failed_patch_row_shows_targets_and_git_reason() -> None:
+    event = {
+        "timestamp": 1,
+        "status": "failed",
+        "tool": "repo_apply_patch",
+        "targets": ["product/backend/internal/service/schedule.go"],
+        "reason": (
+            "error: patch failed: product/backend/internal/service/schedule.go:187\n"
+            "error: product/backend/internal/service/schedule.go: patch does not apply"
+        ),
+        "source": "mcp",
+    }
+    row = event_row(event, "zh")
+    assert "schedule.go" in row
+    assert "patch failed" in row
 
 
 def test_log_refresh_cancel_is_idempotent() -> None:

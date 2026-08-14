@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from repo.file_scope import TraversalOptions
 from repo.filesystem import RepoFilesystem
 from security.guard import validate_read_path, validate_write_path
 
@@ -53,6 +54,6 @@ def test_list_skips_symlinks_and_sensitive_files(tmp_path: Path) -> None:
     (tmp_path / "src" / "app.py").write_text("print('ok')", encoding="utf-8")
     (tmp_path / ".env").write_text("TOKEN=secret", encoding="utf-8")
     fs = RepoFilesystem(tmp_path, 1000)
-    result = fs.list_files(".", 200)
+    result = fs.list_files(TraversalOptions(path=".", limit=200))
     assert "src/app.py" in result["files"]
     assert ".env" not in result["files"]

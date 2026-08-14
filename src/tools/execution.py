@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from audit.logger import AuditLogger
 from tools.runtime import RuntimeContext, audit_event, require_mode
@@ -33,6 +33,15 @@ def _audit_result_fields(result: object) -> dict[str, object]:
         value = payload.get(key)
         if value not in (None, ""):
             fields[key] = value
+    if isinstance(payload.get("files"), list):
+        fields["file_count"] = len(payload["files"])
+    if isinstance(payload.get("matches"), list):
+        fields["match_count"] = len(payload["matches"])
+    backend = payload.get("backend")
+    if backend not in (None, ""):
+        fields["backend"] = backend
+    if payload.get("truncated") is not None:
+        fields["truncated"] = bool(payload["truncated"])
     for stream in ("stderr", "stdout"):
         text = str(payload.get(stream, "")).strip()
         if text:
@@ -53,6 +62,7 @@ def execute(
     target: str = "",
     target_is_sensitive: bool = False,
     result_status: Callable[[T], str] | None = None,
+    failure_fields: Callable[[BaseException], dict[str, Any]] | None = None,
     **fields,
 ) -> T:
     """Run one MCP operation with one permission and audit boundary."""
@@ -114,9 +124,12 @@ def execute(
         return result
 
     assert failure is not None
+    failure_record = dict(record)
+    if failure_fields is not None:
+        failure_record.update(failure_fields(failure))
     audit_event(
         context,
-        **record,
+        **failure_record,
         status=status,
         denial_kind=kind if status == "denied" else "",
         failure_kind=kind if status != "denied" else "",

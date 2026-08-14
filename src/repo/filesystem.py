@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from security.guard import list_files as guarded_list_files
+from repo.file_scope import RepoFileScope, TraversalOptions
 from security.guard import read_text_file, validate_read_path, validate_write_path
 
 
@@ -10,17 +10,24 @@ class RepoFilesystem:
     def __init__(self, repo_root: Path, max_file_bytes: int) -> None:
         self.repo_root = repo_root.resolve()
         self.max_file_bytes = max_file_bytes
+        self.scope = RepoFileScope(self.repo_root)
 
-    def list_files(self, path: str, limit: int) -> dict:
-        base, _ = validate_read_path(self.repo_root, path or ".")
-        effective_limit = min(max(limit, 1), 1000)
-        if base.is_file():
-            relative = base.relative_to(self.repo_root).as_posix()
-            return {"files": [relative], "truncated": False, "limit": effective_limit}
-        if not base.is_dir():
-            raise FileNotFoundError(path)
-        files, truncated = guarded_list_files(base, self.repo_root, effective_limit)
-        return {"files": files, "truncated": truncated, "limit": effective_limit}
+    def list_files(self, options: TraversalOptions) -> dict:
+        effective_limit = min(max(options.limit, 1), 1000)
+        listing = TraversalOptions(
+            path=options.path or ".",
+            limit=effective_limit,
+            include=options.include,
+            exclude=options.exclude,
+            respect_gitignore=options.respect_gitignore,
+            max_file_bytes=min(options.max_file_bytes, self.max_file_bytes),
+        )
+        files, truncated = self.scope.list_files(listing)
+        return {
+            "files": files,
+            "truncated": truncated,
+            "limit": effective_limit,
+        }
 
     def read_file(self, path: str) -> dict:
         target, relative = validate_read_path(self.repo_root, path)

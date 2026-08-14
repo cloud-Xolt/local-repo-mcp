@@ -16,6 +16,7 @@ from gui.readiness import native_tls_probe_target
 from gui.runtime_config import environment_for, merge_environment
 from repo.controller import GitController
 from repo.git import run_git
+from repo.file_scope import RepoFileScope, TraversalOptions
 from repo.search import _search_with_python, build_ripgrep_command
 from security.tokens import http_token_problem, require_strong_http_token
 from tools.execution import execute
@@ -239,23 +240,33 @@ def test_log_view_explains_policy_denial_and_hides_preflight() -> None:
     assert "test command is not allowed" in details
 
 
-def test_ripgrep_command_enforces_size_and_sensitive_globs() -> None:
-    command = build_ripgrep_command("needle", 12345)
+def test_ripgrep_command_enforces_size_and_sensitive_globs(tmp_path: Path) -> None:
+    scope = RepoFileScope(tmp_path)
+    command = build_ripgrep_command(
+        "needle",
+        scope,
+        use_files_from=True,
+        max_file_bytes=12345,
+    )
     assert command[command.index("--max-filesize") + 1] == "12345"
     assert "!.env" in command
     assert "!**/.ssh/**" in command
+    assert "--files-from" in command
 
 
 def test_python_search_enforces_timeout(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / "file.txt").write_text("needle\n", encoding="utf-8")
+    scope = RepoFileScope(tmp_path)
+    options = TraversalOptions(path=".", limit=None, max_file_bytes=1000)
     monkeypatch.setattr("repo.search.time.monotonic", lambda: 100.0)
     with pytest.raises(TimeoutError, match="Python search exceeded"):
         _search_with_python(
             "needle",
             tmp_path,
+            scope,
+            options,
             limit=10,
             max_output_bytes=1000,
-            max_file_bytes=1000,
             timeout_seconds=-1,
         )
 

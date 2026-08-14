@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from repo.file_scope import TraversalOptions
 from repo.search import search_repository
 from tools.contracts import (
     GitDiffResult,
@@ -16,16 +17,94 @@ from tools.runtime import RuntimeContext, repository_info
 READ_MODES = ("read", "write", "test")
 
 
+def _normalize_patterns(values: list[str] | None) -> tuple[str, ...]:
+    if not values:
+        return ()
+    patterns: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        pattern = raw.replace("\\", "/").strip()
+        if not pattern or pattern in seen:
+            continue
+        seen.add(pattern)
+        patterns.append(pattern)
+        if len(patterns) >= 50:
+            break
+    return tuple(patterns)
+
+
+def _scope_audit_fields(options: TraversalOptions, *, limit: int | None = None) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "respect_gitignore": options.respect_gitignore,
+        "max_file_bytes": options.max_file_bytes,
+    }
+    if limit is not None:
+        fields["limit"] = limit
+    if options.include:
+        fields["include"] = list(options.include)
+    if options.exclude:
+        fields["exclude"] = list(options.exclude)
+    return fields
+
+
+def _traversal_options(
+    context: RuntimeContext,
+    *,
+    path: str = ".",
+    limit: int | None,
+    include: list[str] | None,
+    exclude: list[str] | None,
+    respect_gitignore: bool,
+    max_file_size: int | None,
+) -> TraversalOptions:
+    configured_max = context.max_file_bytes
+    if max_file_size is not None:
+        if max_file_size <= 0:
+            raise ValueError("max_file_size must be greater than zero")
+        effective_max = min(max_file_size, configured_max)
+    else:
+        effective_max = configured_max
+    return TraversalOptions(
+        path=path or ".",
+        limit=limit,
+        include=_normalize_patterns(include),
+        exclude=_normalize_patterns(exclude),
+        respect_gitignore=respect_gitignore,
+        max_file_bytes=effective_max,
+    )
+
+
 def register_read_tools(context: RuntimeContext) -> None:
     @context.mcp.tool()
-    def repo_list_files(path: str = ".", limit: int = 200) -> ListFilesResult:
+    def repo_list_files(
+        path: str = ".",
+        limit: int = 200,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        respect_gitignore: bool = True,
+        max_file_size: int | None = None,
+    ) -> ListFilesResult:
         target = path or "."
+        options = _traversal_options(
+            context,
+            path=target,
+            limit=limit,
+            include=include,
+            exclude=exclude,
+            respect_gitignore=respect_gitignore,
+            max_file_size=max_file_size,
+        )
+
+        def operation() -> dict[str, Any]:
+            return context.filesystem.list_files(options)
+
         result = execute(
             context,
             tool="repo_list_files",
             modes=READ_MODES,
-            operation=lambda: context.filesystem.list_files(target, limit),
+            operation=operation,
             target=target,
+            **_scope_audit_fields(options, limit=limit),
         )
         result["repository"] = repository_info(context)
         return result
@@ -43,8 +122,24 @@ def register_read_tools(context: RuntimeContext) -> None:
         return result
 
     @context.mcp.tool()
-    def repo_search_code(query: str, limit: int = 50) -> SearchCodeResult:
+    def repo_search_code(
+        query: str,
+        limit: int = 50,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        respect_gitignore: bool = True,
+        max_file_size: int | None = None,
+    ) -> SearchCodeResult:
         effective_limit = min(max(limit, 1), context.max_search_results)
+        options = _traversal_options(
+            context,
+            path=".",
+            limit=None,
+            include=include,
+            exclude=exclude,
+            respect_gitignore=respect_gitignore,
+            max_file_size=max_file_size,
+        )
 
         def search() -> dict[str, Any]:
             if not query or len(query) > 200:
@@ -54,9 +149,10 @@ def register_read_tools(context: RuntimeContext) -> None:
             return search_repository(
                 query,
                 context.repo_root,
-                effective_limit,
+                options,
                 context.max_output_bytes,
-                context.max_file_bytes,
+                effective_limit,
+                scope=context.filesystem.scope,
             )
 
         result = execute(
@@ -66,6 +162,7 @@ def register_read_tools(context: RuntimeContext) -> None:
             operation=search,
             target=query,
             target_is_sensitive=True,
+            **_scope_audit_fields(options, limit=effective_limit),
         )
         result["limit"] = effective_limit
         result["repository"] = repository_info(context)

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
+
+_PATCH_FAILED_PATH = re.compile(r"^error: patch failed: ([^:\n]+):\d+", re.MULTILINE)
+_PATCH_MISSING_PATH = re.compile(
+    r"^error: ([^:\n]+): No such file or directory",
+    re.MULTILINE,
+)
 
 UNSUPPORTED_PATCH_MARKERS = (
     "GIT binary patch",
@@ -19,6 +26,19 @@ UNSUPPORTED_PATCH_MARKERS = (
     "new file mode 120000",
     "Subproject commit ",
 )
+
+
+def parse_patch_failure_paths(message: str) -> list[str]:
+    """Extract repository-relative paths from git apply stderr."""
+    paths: list[str] = []
+    seen: set[str] = set()
+    for pattern in (_PATCH_FAILED_PATH, _PATCH_MISSING_PATH):
+        for match in pattern.finditer(message):
+            path = match.group(1).strip().replace("\\", "/")
+            if path and path not in seen:
+                seen.add(path)
+                paths.append(path)
+    return paths
 
 
 def reject_unsupported_patch_types(patch: str) -> None:
@@ -56,6 +76,26 @@ def parse_deleted_patch_paths(patch: str) -> set[str]:
         elif current_path is not None and line == "+++ /dev/null":
             deleted.add(current_path)
     return deleted
+
+
+def git_list_files(
+    repo_root: Path,
+    *,
+    respect_gitignore: bool,
+    path_prefix: str = "",
+) -> list[str]:
+    args = ["ls-files", "-z", "--cached", "--others"]
+    if respect_gitignore:
+        args.append("--exclude-standard")
+    else:
+        args.append("--ignored")
+    prefix = path_prefix.replace("\\", "/").strip("/")
+    if prefix and prefix != ".":
+        args.extend(["--", prefix])
+    result = run_git(repo_root, args)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "git ls-files failed")
+    return [path.replace("\\", "/") for path in result.stdout.split("\0") if path]
 
 
 def run_git(

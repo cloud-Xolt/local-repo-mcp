@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from repo.file_scope import TraversalOptions
 from repo.filesystem import RepoFilesystem
 
 
@@ -41,6 +42,6 @@ def test_list_files_respects_limit(repo_root: Path) -> None:
     for i in range(5):
         (repo_root / "src" / f"f{i}.py").write_text("x\n", encoding="utf-8")
     fs = RepoFilesystem(repo_root, max_file_bytes=1000)
-    result = fs.list_files("src", limit=3)
+    result = fs.list_files(TraversalOptions(path="src", limit=3))
     assert len(result["files"]) == 3
     assert result["truncated"] is True
