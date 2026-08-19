@@ -100,6 +100,8 @@ class LocalRepoMCPApp(ctk.CTk):
         self.last_test: dict | None = None
         self.api_key_visible = False
         self.token_visible = False
+        self._api_key_entry = None
+        self._api_key_toggle_btn = None
         self.section_state = {
             "home_http": True,
             "home_advanced": False,
@@ -265,14 +267,17 @@ class LocalRepoMCPApp(ctk.CTk):
 
         prefs = ctk.CTkFrame(sidebar, fg_color="transparent")
         prefs.pack(fill="x", padx=10, pady=(0, 16))
-        language = ctk.CTkSegmentedButton(
+
+        language = ctk.CTkOptionMenu(
             prefs,
             values=["中文", "English"],
-            height=40,
-            selected_color=COLORS["accent_soft"],
-            selected_hover_color=COLORS["surface_hover"],
-            unselected_color=COLORS["surface_alt"],
-            unselected_hover_color=COLORS["surface_hover"],
+            height=INPUT_HEIGHT,
+            corner_radius=CONTROL_RADIUS,
+            fg_color=COLORS["surface_alt"],
+            button_color=COLORS["surface_hover"],
+            button_hover_color=COLORS["border_strong"],
+            dropdown_fg_color=COLORS["surface"],
+            dropdown_hover_color=COLORS["surface_hover"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=FONT_SMALL),
             command=self._change_language,
@@ -280,14 +285,16 @@ class LocalRepoMCPApp(ctk.CTk):
         language.set("中文" if self.config_data.language == "zh" else "English")
         language.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
-        appearance = ctk.CTkSegmentedButton(
+        appearance = ctk.CTkOptionMenu(
             prefs,
             values=[self.t("system"), self.t("light"), self.t("dark")],
-            height=40,
-            selected_color=COLORS["accent_soft"],
-            selected_hover_color=COLORS["surface_hover"],
-            unselected_color=COLORS["surface_alt"],
-            unselected_hover_color=COLORS["surface_hover"],
+            height=INPUT_HEIGHT,
+            corner_radius=CONTROL_RADIUS,
+            fg_color=COLORS["surface_alt"],
+            button_color=COLORS["surface_hover"],
+            button_hover_color=COLORS["border_strong"],
+            dropdown_fg_color=COLORS["surface"],
+            dropdown_hover_color=COLORS["surface_hover"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=FONT_SMALL),
             command=self._change_appearance,
@@ -299,7 +306,7 @@ class LocalRepoMCPApp(ctk.CTk):
                 "dark": self.t("dark"),
             }[self.config_data.appearance]
         )
-        appearance.pack(side="left", padx=(4, 0))
+        appearance.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         self.content = ctk.CTkFrame(self, fg_color=COLORS["bg"], corner_radius=0)
         self.content.grid(row=0, column=1, sticky="nsew")
@@ -553,8 +560,9 @@ class LocalRepoMCPApp(ctk.CTk):
             show=show,
         )
         entry.grid(row=1, column=0, sticky="ew")
+        button = None
         if button_text and button_command:
-            ctk.CTkButton(
+            button = ctk.CTkButton(
                 wrap,
                 text=button_text,
                 width=button_width,
@@ -567,8 +575,9 @@ class LocalRepoMCPApp(ctk.CTk):
                 text_color=COLORS["text"],
                 font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
                 command=button_command,
-            ).grid(row=1, column=1, padx=(8, 0))
-        return entry
+            )
+            button.grid(row=1, column=1, padx=(8, 0))
+        return entry, button
 
     def _primary_button(self, parent, text: str, command: Callable, *, danger: bool = False):
         return ctk.CTkButton(
@@ -963,7 +972,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self._field(setup, self.t("tunnel_client"), self.tunnel_path_var, row=0, column=0)
         self._field(setup, self.t("profile"), self.tunnel_profile_var, row=0, column=1)
         self._field(setup, self.t("tunnel_id"), self.tunnel_id_var, row=1, column=0)
-        self._field(
+        self._api_key_entry, self._api_key_toggle_btn = self._field(
             setup,
             self.t("api_key"),
             self.api_key_var,
@@ -1395,7 +1404,12 @@ class LocalRepoMCPApp(ctk.CTk):
 
     def _toggle_api_key(self) -> None:
         self.api_key_visible = not self.api_key_visible
-        self._show_page("chatgpt")
+        if self._api_key_entry is not None:
+            self._api_key_entry.configure(show="" if self.api_key_visible else "•")
+        if self._api_key_toggle_btn is not None:
+            self._api_key_toggle_btn.configure(
+                text="🙈" if self.api_key_visible else "👁",
+            )
 
     def _browse_repo(self) -> None:
         path = filedialog.askdirectory(initialdir=self.repo_var.get() or str(ROOT))
