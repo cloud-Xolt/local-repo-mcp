@@ -256,6 +256,7 @@ def register_test_tools(context: RuntimeContext) -> None:
         command_keys: tuple[str, ...] = (),
         timeout_seconds: int = 120,
         stop_on_failure: bool = True,
+        working_dir: str = ".",
     ) -> VerificationCallToolResult:
         """Run one or more allowlisted repository verification commands.
 
@@ -263,6 +264,19 @@ def register_test_tools(context: RuntimeContext) -> None:
         Go, Node, Maven, and Gradle repositories. `command_key` preserves the
         original single-command API. `command_keys` runs a bounded sequential
         batch; the complete batch is validated before the first command starts.
+
+        `working_dir` selects a repository-relative directory as the process
+        working directory for every command in the request. Preflight checks
+        run against that directory, so monorepos can target any language root:
+        Go (go.mod), Node (package.json), Maven (pom.xml), Gradle, or Python.
+
+        Examples:
+        - repo_run_test(command_key="go_test", working_dir="backend")
+        - repo_run_test(command_key="node_test", working_dir="packages/web")
+        - repo_run_test(command_key="maven_test", working_dir="services/api")
+
+        command_key always names the allowlisted profile; working_dir selects
+        where that profile executes inside the configured repository.
 
         Every started command returns command, exit_code, stdout, stderr,
         duration and truncation metadata. Timeout/output-limit termination is a
@@ -273,6 +287,8 @@ def register_test_tools(context: RuntimeContext) -> None:
         are returned as native MCP image content.
         """
 
+        effective_working_dir = working_dir or "."
+
         def run_requested() -> dict[str, Any]:
             keys, is_batch = _requested_command_keys(command_key, command_keys)
             if is_batch:
@@ -280,8 +296,13 @@ def register_test_tools(context: RuntimeContext) -> None:
                     keys,
                     timeout_seconds,
                     stop_on_failure=stop_on_failure,
+                    working_dir=effective_working_dir,
                 ).as_dict()
-            return context.command_runner.run(keys[0], timeout_seconds).as_dict()
+            return context.command_runner.run(
+                keys[0],
+                timeout_seconds,
+                working_dir=effective_working_dir,
+            ).as_dict()
 
         result = execute(
             context,
@@ -293,7 +314,10 @@ def register_test_tools(context: RuntimeContext) -> None:
             ),
             command_key=command_key,
             command_keys=command_keys or [],
+            working_dir=effective_working_dir,
             repository_root=str(context.repo_root.resolve()),
         )
+        if effective_working_dir != ".":
+            result["working_dir"] = effective_working_dir
         result["repository"] = repository_info(context)
         return _build_test_result(context, result)

@@ -28,8 +28,24 @@ UNSUPPORTED_PATCH_MARKERS = (
 )
 
 
+def normalize_patch(patch: str) -> str:
+    text = patch.replace("\r\n", "\n").replace("\r", "\n")
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    if not text.endswith("\n"):
+        text += "\n"
+    return text
+
+
+_GIT_APPLY_TOLERANCE = (
+    "--ignore-space-change",
+    "--ignore-whitespace",
+    "--whitespace=nowarn",
+    "--recount",
+)
+
+
 def parse_patch_failure_paths(message: str) -> list[str]:
-    """Extract repository-relative paths from git apply stderr."""
     paths: list[str] = []
     seen: set[str] = set()
     for pattern in (_PATCH_FAILED_PATH, _PATCH_MISSING_PATH):

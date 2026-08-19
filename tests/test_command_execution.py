@@ -27,6 +27,7 @@ def test_default_registry_covers_test_build_lint_and_check() -> None:
         "go_test",
         "go_build",
         "go_vet",
+        "go_fmt",
         "node_test",
         "node_build",
         "node_lint",
@@ -55,7 +56,77 @@ def test_go_commands_fail_fast_without_go_mod(tmp_path: Path) -> None:
 
     assert result["success"] is False
     assert result["exit_code"] == 1
-    assert "no go.mod" in result["stderr"]
+    assert "missing required go.mod" in result["stderr"]
+
+
+def test_runner_uses_subdirectory_working_dir(tmp_path: Path) -> None:
+    sub = tmp_path / "backend"
+    sub.mkdir()
+    runner = RepoCommandRunner(
+        tmp_path,
+        20_000,
+        30,
+        registry=_registry(_python_spec("cwd", "import os; print(os.getcwd())")),
+    )
+
+    result = runner.run("cwd", 10, working_dir="backend").as_dict()
+
+    assert result["working_dir"] == "backend"
+    assert Path(result["stdout"].strip()) == sub.resolve()
+
+
+def test_go_preflight_checks_subdirectory_working_dir(tmp_path: Path) -> None:
+    sub = tmp_path / "backend"
+    sub.mkdir()
+    runner = RepoCommandRunner(tmp_path, 20_000, 30)
+
+    missing = runner.run("go_test", 10, working_dir="backend").as_dict()
+    assert "missing required go.mod" in missing["stderr"]
+
+    (sub / "go.mod").write_text("module example.com/backend\n\ngo 1.21\n", encoding="utf-8")
+    ready = runner.run("go_test", 10, working_dir="backend").as_dict()
+    assert "missing required go.mod" not in ready["stderr"]
+
+
+def test_preflight_is_language_agnostic_for_working_dir(tmp_path: Path) -> None:
+    web = tmp_path / "packages" / "web"
+    web.mkdir(parents=True)
+    (web / "package.json").write_text('{"name":"web"}\n', encoding="utf-8")
+    runner = RepoCommandRunner(
+        tmp_path,
+        20_000,
+        30,
+        registry=_registry(_python_spec("node_test", "print('ok')")),
+    )
+
+    blocked = runner.run("node_test", 10).as_dict()
+    assert "missing required package.json" in blocked["stderr"]
+
+    allowed = runner.run("node_test", 10, working_dir="packages/web").as_dict()
+    assert "missing required package.json" not in allowed["stderr"]
+    assert allowed["working_dir"] == "packages/web"
+
+
+def test_unknown_command_key_hints_working_dir_instead_of_prefix_aliases() -> None:
+    with pytest.raises(PermissionError, match="working_dir"):
+        DEFAULT_COMMAND_REGISTRY.get("backend_go_test")
+
+
+def test_runner_rejects_invalid_working_dir(tmp_path: Path) -> None:
+    runner = RepoCommandRunner(
+        tmp_path,
+        20_000,
+        30,
+        registry=_registry(_python_spec("ok", "print('ok')")),
+    )
+    with pytest.raises(PermissionError, match="parent traversal"):
+        runner.run("ok", 10, working_dir="../outside")
+    with pytest.raises(NotADirectoryError, match="not a directory"):
+        runner.run("ok", 10, working_dir="missing")
+    file_path = tmp_path / "file.txt"
+    file_path.write_text("x", encoding="utf-8")
+    with pytest.raises(NotADirectoryError, match="not a directory"):
+        runner.run("ok", 10, working_dir="file.txt")
 
 
 def test_safe_environment_preserves_go_toolchain_vars(tmp_path: Path, monkeypatch) -> None:
@@ -66,6 +137,17 @@ def test_safe_environment_preserves_go_toolchain_vars(tmp_path: Path, monkeypatc
     assert env["GOMODCACHE"] == "C:/Users/test/go/pkg/mod"
     assert env["GOPROXY"] == "https://proxy.example"
     assert "SECRET_TOKEN" not in env
+    assert "-buildvcs=false" in env["GOFLAGS"]
+
+
+def test_safe_environment_appends_buildvcs_without_clobbering_goflags(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GOFLAGS", "-tags=integration")
+    env = _safe_environment(tmp_path)
+    assert "-tags=integration" in env["GOFLAGS"]
+    assert "-buildvcs=false" in env["GOFLAGS"]
 
 
 def test_single_command_returns_verifiable_evidence(tmp_path: Path) -> None:
@@ -276,6 +358,12 @@ def test_mcp_surface_remains_eight_tools_with_batch_command_schema() -> None:
         "repo_git_status", "repo_git_diff", "repo_apply_patch", "repo_git_commit", "repo_run_test",
     }
     parameters = inspect.signature(mcp.tools["repo_run_test"]).parameters
-    assert set(parameters) == {"command_key", "command_keys", "timeout_seconds", "stop_on_failure"}
+    assert set(parameters) == {
+        "command_key",
+        "command_keys",
+        "timeout_seconds",
+        "stop_on_failure",
+        "working_dir",
+    }
     commit_parameters = inspect.signature(mcp.tools["repo_git_commit"]).parameters
     assert set(commit_parameters) == {"message", "paths"}

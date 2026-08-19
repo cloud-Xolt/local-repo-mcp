@@ -37,6 +37,63 @@ def test_tunnel_init_mcp_command_uses_launcher() -> None:
     assert "powershell" not in text
 
 
+def test_start_prepares_profile_before_run(tmp_path, monkeypatch) -> None:
+    profile_dir = tmp_path / "tunnel-client"
+    profile_dir.mkdir()
+    profile = profile_dir / "local-repo.yaml"
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+        if command[1] == "--version":
+            return Result()
+        if command[1] == "init":
+            profile.write_text("mcp: {}\n", encoding="utf-8")
+            return Result()
+        if command[1] == "doctor":
+            return Result()
+        if command[1] == "run":
+            return Result()
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(tm.subprocess, "run", fake_run)
+    monkeypatch.setattr(tm, "_profile_base_dir", lambda: profile_dir)
+    monkeypatch.setattr(
+        tm.TunnelManager,
+        "resolve_executable",
+        lambda self, config: "tunnel-client",
+    )
+    monkeypatch.setattr(
+        tm.ProcessManager,
+        "ensure_process_stable",
+        lambda self, process: None,
+    )
+
+    started: list[list[str]] = []
+
+    def fake_start(self, command, *, env=None, cwd=None, clear_logs=True):
+        started.append(command)
+
+    monkeypatch.setattr(ManagedProcess, "start", fake_start)
+
+    config = AppConfig(
+        repo_root=".",
+        tunnel_profile="local-repo",
+        tunnel_id="tunnel_test",
+        control_plane_api_key="secret",
+        transport="stdio",
+    )
+    manager = tm.TunnelManager(tm.ProcessManager())
+    manager.start(config)
+
+    assert [part[1] for part in calls] == ["--version", "init", "doctor"]
+    assert started == [["tunnel-client", "run", "--profile", "local-repo"]]
+
+
 def test_repair_profile_command_rewrites_broken_yaml(tmp_path, monkeypatch) -> None:
     profile_dir = tmp_path / "tunnel-client"
     profile_dir.mkdir()

@@ -26,12 +26,16 @@ class CommandRegistry:
         self._specs = MappingProxyType(values)
 
     def get(self, key: str) -> CommandSpec:
+        normalized = str(key).strip()
         try:
-            return self._specs[key]
+            return self._specs[normalized]
         except KeyError as exc:
             allowed = ", ".join(sorted(self._specs))
             raise PermissionError(
-                f"repository command is not allowed: {key}; allowed={allowed}"
+                "repository command is not allowed: "
+                f"{normalized!r}. command_key must be one allowlisted profile; "
+                "use working_dir for project subdirectories inside the repository. "
+                f"allowed={allowed}"
             ) from exc
 
     def keys(self) -> tuple[str, ...]:
@@ -48,6 +52,7 @@ DEFAULT_COMMAND_REGISTRY = CommandRegistry(
         CommandSpec("go_test", "test", ("go", "test", "./...")),
         CommandSpec("go_build", "build", ("go", "build", "./...")),
         CommandSpec("go_vet", "check", ("go", "vet", "./...")),
+        CommandSpec("go_fmt", "check", ("go", "fmt", "./...")),
         CommandSpec("node_test", "test", ("npm", "test", "--")),
         CommandSpec("node_build", "build", ("npm", "run", "build", "--")),
         CommandSpec("node_lint", "lint", ("npm", "run", "lint", "--")),

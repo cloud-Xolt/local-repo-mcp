@@ -5,6 +5,7 @@ from pathlib import Path
 from conftest import commit_all, init_repo
 from repo.controller import GitController
 from repo.git import (
+    normalize_patch,
     parse_deleted_patch_paths,
     run_git,
 )
@@ -60,6 +61,50 @@ def test_patch_targets_and_application(tmp_path: Path) -> None:
     git.apply_patch_check(patch)
     git.apply_patch(patch)
     assert (repo / "app.py").read_text(encoding="utf-8") == "one\ntwo\n"
+
+
+def test_apply_patch_tolerates_tab_context_with_space_patch(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    (repo / "main.go").write_text("package main\n\nfunc f() {\n\treturn 1\n}\n", encoding="utf-8")
+    commit_all(repo)
+    patch = (
+        "diff --git a/main.go b/main.go\n"
+        "--- a/main.go\n"
+        "+++ b/main.go\n"
+        "@@ -3,3 +3,4 @@ package main\n"
+        " func f() {\n"
+        "     return 1\n"
+        " }\n"
+        "+// added\n"
+    )
+    git = controller(repo)
+    git.apply_patch_check(patch)
+    git.apply_patch(patch)
+    assert "// added" in (repo / "main.go").read_text(encoding="utf-8")
+
+
+def test_apply_patch_recounts_incorrect_hunk_headers(tmp_path: Path) -> None:
+    repo = init_repo(tmp_path)
+    (repo / "main.go").write_text("alpha\nbeta\n", encoding="utf-8")
+    commit_all(repo)
+    patch = (
+        "diff --git a/main.go b/main.go\n"
+        "--- a/main.go\n"
+        "+++ b/main.go\n"
+        "@@ -1,1 +1,2 @@\n"
+        " alpha\n"
+        " beta\n"
+        "+gamma\n"
+    )
+    git = controller(repo)
+    git.apply_patch_check(patch)
+    git.apply_patch(patch)
+    assert (repo / "main.go").read_text(encoding="utf-8") == "alpha\nbeta\ngamma\n"
+
+
+def test_normalize_patch_strips_bom_and_trailing_newline(tmp_path: Path) -> None:
+    assert normalize_patch("\ufeffx\n") == "x\n"
+    assert normalize_patch("a\r\nb") == "a\nb\n"
 
 
 def test_crlf_patch_protocol_is_normalized(tmp_path: Path) -> None:

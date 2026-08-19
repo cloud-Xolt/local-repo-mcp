@@ -33,13 +33,14 @@ class CommandResult:
     stderr_truncated: bool
     timeout_seconds: int
     duration_ms: int
+    working_dir: str | None = None
 
     @property
     def success(self) -> bool:
         return self.status == "success"
 
     def as_dict(self) -> dict:
-        return {
+        payload = {
             "command_key": self.spec.key,
             "command_kind": self.spec.kind,
             "argv": list(self.spec.argv),
@@ -56,6 +57,9 @@ class CommandResult:
             "timeout_seconds": self.timeout_seconds,
             "duration_ms": self.duration_ms,
         }
+        if self.working_dir is not None:
+            payload["working_dir"] = self.working_dir
+        return payload
 
 
 @dataclass(frozen=True)

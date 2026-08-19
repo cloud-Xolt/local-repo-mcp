@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from repo.changes import ChangeRecord, parse_name_status_z, parse_porcelain_v1_z
-from repo.git import parse_numstat_z
+from repo.git import _GIT_APPLY_TOLERANCE, normalize_patch, parse_numstat_z
 from repo.worktree import branch_name
 from security.guard import is_read_denied, is_write_denied
 
@@ -183,9 +183,10 @@ class GitController:
         return sorted(conflicts)
 
     def patch_targets(self, patch: str) -> list[str]:
+        normalized = normalize_patch(patch)
         result = self.runner(
-            ["apply", "--check", "--numstat", "-z"],
-            input_text=patch,
+            ["apply", "--check", "--numstat", "-z", *_GIT_APPLY_TOLERANCE],
+            input_text=normalized,
         )
         targets = parse_numstat_z(self._require_ok(result, "invalid patch"))
         if not targets:
@@ -194,28 +195,21 @@ class GitController:
 
     def apply_patch_check(self, patch: str) -> None:
         self._check_no_interrupted_operation()
+        normalized = normalize_patch(patch)
         self._require_ok(
             self.runner(
-                [
-                    "apply",
-                    "--check",
-                    "--ignore-space-change",
-                    "--whitespace=nowarn",
-                ],
-                input_text=patch,
+                ["apply", "--check", *_GIT_APPLY_TOLERANCE],
+                input_text=normalized,
             ),
             "git apply --check failed",
         )
 
     def apply_patch(self, patch: str) -> None:
+        normalized = normalize_patch(patch)
         self._require_ok(
             self.runner(
-                [
-                    "apply",
-                    "--ignore-space-change",
-                    "--whitespace=nowarn",
-                ],
-                input_text=patch,
+                ["apply", *_GIT_APPLY_TOLERANCE],
+                input_text=normalized,
             ),
             "git apply failed",
         )

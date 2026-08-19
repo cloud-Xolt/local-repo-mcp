@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from commands.models import CommandBatchResult, CommandResult, CommandSpec, CommandStatus
+from commands.preflight import preflight_error
 from commands.registry import DEFAULT_COMMAND_REGISTRY, CommandRegistry
+from security.guard import validate_read_path
 
 _ALLOWED_ENV = {
     "PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "SYSTEMROOT",
@@ -107,6 +109,9 @@ def _safe_environment(repo_root: Path) -> dict[str, str]:
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONPYCACHEPREFIX"] = str(temp_root / "pycache")
     env.pop("PYTEST_ADDOPTS", None)
+    goflags = env.get("GOFLAGS", "").strip()
+    if "-buildvcs=false" not in goflags:
+        env["GOFLAGS"] = f"{goflags} -buildvcs=false".strip() if goflags else "-buildvcs=false"
     if os.name == "nt":
         for key, suffix in (
             ("HOME", "home"), ("USERPROFILE", "home"),
@@ -172,23 +177,20 @@ def _read_bounded(path: Path, max_bytes: int) -> tuple[str, bool]:
     return raw.decode("utf-8", errors="replace"), size > max_bytes
 
 
-def _preflight_failure(spec: CommandSpec, repo_root: Path) -> CommandResult | None:
-    root = repo_root.resolve()
-    key = spec.key
-    stderr = ""
+def _resolve_working_dir(repo_root: Path, working_dir: str) -> tuple[Path, str]:
+    target, relative = validate_read_path(repo_root, working_dir or ".")
+    if not target.is_dir():
+        raise NotADirectoryError(f"working_dir is not a directory: {relative}")
+    return target.resolve(), relative
 
-    if key.startswith("go_") and not (root / "go.mod").is_file():
-        stderr = f"repository has no go.mod at {root}"
-    elif key.startswith("node_") and not (root / "package.json").is_file():
-        stderr = f"repository has no package.json at {root}"
-    elif key.startswith("maven_") and not (root / "pom.xml").is_file():
-        stderr = f"repository has no pom.xml at {root}"
-    elif key.startswith("gradle_") and not any(
-        (root / name).is_file()
-        for name in ("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
-    ):
-        stderr = f"repository has no Gradle build files at {root}"
 
+def _preflight_failure(
+    spec: CommandSpec,
+    *,
+    working_dir: Path,
+    working_dir_relative: str,
+) -> CommandResult | None:
+    stderr = preflight_error(spec, working_dir.resolve())
     if not stderr:
         return None
 
@@ -202,6 +204,7 @@ def _preflight_failure(spec: CommandSpec, repo_root: Path) -> CommandResult | No
         stderr_truncated=False,
         timeout_seconds=0,
         duration_ms=0,
+        working_dir=working_dir_relative,
     )
 
 
@@ -246,9 +249,15 @@ class RepoCommandRunner:
         # Resolve the complete batch before executing anything.
         return tuple(self.registry.get(key) for key in keys)
 
-    def run(self, command_key: str, timeout_seconds: int) -> CommandResult:
+    def run(
+        self,
+        command_key: str,
+        timeout_seconds: int,
+        *,
+        working_dir: str = ".",
+    ) -> CommandResult:
         spec = self.registry.get(str(command_key).strip())
-        return self._run_spec(spec, timeout_seconds)
+        return self._run_spec(spec, timeout_seconds, working_dir=working_dir)
 
     def run_many(
         self,
@@ -256,11 +265,12 @@ class RepoCommandRunner:
         timeout_seconds: int,
         *,
         stop_on_failure: bool = True,
+        working_dir: str = ".",
     ) -> CommandBatchResult:
         specs = self._resolve_batch(command_keys)
         results: list[CommandResult] = []
         for spec in specs:
-            result = self._run_spec(spec, timeout_seconds)
+            result = self._run_spec(spec, timeout_seconds, working_dir=working_dir)
             results.append(result)
             if stop_on_failure and not result.success:
                 break
@@ -270,8 +280,19 @@ class RepoCommandRunner:
             stop_on_failure=bool(stop_on_failure),
         )
 
-    def _run_spec(self, spec: CommandSpec, timeout_seconds: int) -> CommandResult:
-        blocked = _preflight_failure(spec, self.repo_root)
+    def _run_spec(
+        self,
+        spec: CommandSpec,
+        timeout_seconds: int,
+        *,
+        working_dir: str = ".",
+    ) -> CommandResult:
+        cwd, cwd_relative = _resolve_working_dir(self.repo_root, working_dir)
+        blocked = _preflight_failure(
+            spec,
+            working_dir=cwd,
+            working_dir_relative=cwd_relative,
+        )
         if blocked is not None:
             self._emit(
                 event="command_finish",
@@ -284,6 +305,7 @@ class RepoCommandRunner:
                 duration_ms=0,
                 reason=blocked.stderr,
                 repository_root=str(self.repo_root.resolve()),
+                working_dir=cwd_relative,
             )
             return blocked
 
@@ -303,7 +325,7 @@ class RepoCommandRunner:
                 try:
                     process = subprocess.Popen(
                         list(spec.argv),
-                        cwd=self.repo_root,
+                        cwd=cwd,
                         shell=False,
                         stdin=subprocess.DEVNULL,
                         stdout=stdout,
@@ -324,6 +346,7 @@ class RepoCommandRunner:
                     command=spec.display_command(),
                     child_process_id=process.pid,
                     repository_root=str(self.repo_root.resolve()),
+                    working_dir=cwd_relative,
                 )
                 deadline = time.monotonic() + timeout
                 while process.poll() is None:
@@ -356,6 +379,7 @@ class RepoCommandRunner:
                 stderr_truncated=stderr_truncated,
                 timeout_seconds=timeout,
                 duration_ms=int((time.monotonic() - started) * 1000),
+                working_dir=cwd_relative,
             )
             self._emit(
                 event="command_finish",
@@ -370,6 +394,7 @@ class RepoCommandRunner:
                 stderr_truncated=result.stderr_truncated,
                 reason=(result.stderr or result.stdout).strip()[:500] or None,
                 repository_root=str(self.repo_root.resolve()),
+                working_dir=cwd_relative,
             )
             return result
         finally:

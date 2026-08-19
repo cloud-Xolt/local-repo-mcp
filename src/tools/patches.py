@@ -47,7 +47,8 @@ def register_patch_tools(context: RuntimeContext) -> None:
                     f"patch exceeds limit: {patch_bytes} > {context.max_patch_bytes}"
                 )
             reject_unsupported_patch_types(patch)
-            targets = context.git.patch_targets(patch)
+            normalized_patch = patch  # scanner/paths use original; git layer normalizes
+            targets = context.git.patch_targets(normalized_patch)
             state["targets"] = targets
             deleted = parse_deleted_patch_paths(patch)
             actions = {
@@ -65,8 +66,8 @@ def register_patch_tools(context: RuntimeContext) -> None:
                             "patch target has existing changes: "
                             + ", ".join(conflicts)
                         )
-                context.git.apply_patch_check(patch)
-                context.git.apply_patch(patch)
+                context.git.apply_patch_check(normalized_patch)
+                context.git.apply_patch(normalized_patch)
 
             diff = context.git.diff_for_paths(targets)
             audit_event(

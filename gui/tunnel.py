@@ -265,9 +265,18 @@ class TunnelManager:
             return f"{version}\n\n{note}Profile found: {profile}\nSet Runtime API Key, then run Doctor."
         return f"{version}\n\n{note}{self.doctor(config)}"
 
+    def prepare(self, config: AppConfig) -> str:
+        messages = [self.version(config)]
+        if not self.profile_path(config).is_file():
+            messages.append(self.init_profile(config))
+        messages.append(self.doctor(config))
+        return "\n\n".join(messages)
+
     def start(self, config: AppConfig) -> None:
         if config.transport == "streamable-http" and not self.processes.mcp.running:
             raise RuntimeError("Start the Streamable HTTP MCP server before the Tunnel")
+        prepared = self.prepare(config)
+        self._record("Tunnel prepared", prepared)
         self.processes.tunnel.start(
             [
                 self.resolve_executable(config),

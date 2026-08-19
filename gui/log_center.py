@@ -280,6 +280,7 @@ def event_details(event: dict[str, Any], language: str, *, raw: bool = False) ->
         ("transport", ("传输", "Transport")),
         ("process_id", ("进程", "Process")),
         ("repository_root", ("仓库路径", "Repository root")),
+        ("working_dir", ("工作目录", "Working directory")),
         ("event_id", ("事件 ID", "Event ID")),
         ("denial_kind", ("拒绝类型", "Denial kind")),
         ("failure_kind", ("失败类型", "Failure kind")),
@@ -331,6 +332,8 @@ def _compact_details(event: dict[str, Any], language: str = "zh") -> str:
         command = str(event["command_key"])
         kind = str(event.get("command_kind", "")).upper()
         details.append(f"{kind} {command}".strip())
+    if event.get("working_dir") and str(event["working_dir"]) not in {".", ""}:
+        details.append(f"cwd={event['working_dir']}")
     if event.get("respect_gitignore") is False:
         details.append("NO GITIGNORE" if language != "zh" else "忽略 .gitignore")
     for key, label in (("include", "include"), ("exclude", "exclude")):

@@ -24,8 +24,18 @@ class RepoTestRunner:
     def event_sink(self, value) -> None:
         self._runner.event_sink = value
 
-    def run(self, command_key: str, timeout_seconds: int) -> dict:
-        return self._runner.run(command_key, timeout_seconds).as_dict()
+    def run(
+        self,
+        command_key: str,
+        timeout_seconds: int,
+        *,
+        working_dir: str = ".",
+    ) -> dict:
+        return self._runner.run(
+            command_key,
+            timeout_seconds,
+            working_dir=working_dir,
+        ).as_dict()
 
     def run_many(
         self,
@@ -33,9 +43,11 @@ class RepoTestRunner:
         timeout_seconds: int,
         *,
         stop_on_failure: bool = True,
+        working_dir: str = ".",
     ) -> dict:
         return self._runner.run_many(
             command_keys,
             timeout_seconds,
             stop_on_failure=stop_on_failure,
+            working_dir=working_dir,
         ).as_dict()

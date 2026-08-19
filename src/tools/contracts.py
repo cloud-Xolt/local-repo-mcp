@@ -140,6 +140,7 @@ class VerificationResultModel(BaseModel):
     batch: bool | None = None
     command_key: str | None = None
     command_kind: Literal["test", "build", "lint", "check"] | None = None
+    working_dir: str | None = None
     argv: list[str] | None = None
     command: str | None = None
     exit_code: int | None = None

@@ -521,6 +521,7 @@ class LocalRepoMCPApp(ctk.CTk):
         show: str | None = None,
         button_text: str | None = None,
         button_command: Callable | None = None,
+        button_width: int = 92,
     ):
         wrap = ctk.CTkFrame(parent, fg_color="transparent")
         wrap.grid(
@@ -556,7 +557,7 @@ class LocalRepoMCPApp(ctk.CTk):
             ctk.CTkButton(
                 wrap,
                 text=button_text,
-                width=92,
+                width=button_width,
                 height=INPUT_HEIGHT,
                 corner_radius=CONTROL_RADIUS,
                 fg_color=COLORS["surface_alt"],
@@ -969,6 +970,9 @@ class LocalRepoMCPApp(ctk.CTk):
             row=1,
             column=1,
             show="" if self.api_key_visible else "•",
+            button_text="🙈" if self.api_key_visible else "👁",
+            button_command=self._toggle_api_key,
+            button_width=44,
         )
         self._field(
             setup,
@@ -992,30 +996,14 @@ class LocalRepoMCPApp(ctk.CTk):
 
         controls = ctk.CTkFrame(setup, fg_color="transparent")
         controls.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        tunnel_actions = (
-            self._secondary_button(
-                controls,
-                self.t("hide") if self.api_key_visible else self.t("show"),
-                self._toggle_api_key,
-            ),
-            self._secondary_button(controls, self.t("detect"), self._detect_tunnel),
-            self._secondary_button(controls, self.t("initialize"), self._init_tunnel),
-            self._secondary_button(controls, self.t("doctor"), self._doctor_tunnel),
-            self._primary_button(
-                controls,
-                self.t("stop_tunnel") if self.processes.tunnel.running else self.t("start_tunnel"),
-                self._stop_tunnel if self.processes.tunnel.running else self._start_tunnel,
-                danger=self.processes.tunnel.running,
-            ),
+        start_button = self._primary_button(
+            controls,
+            self.t("stop_tunnel") if self.processes.tunnel.running else self.t("start_tunnel"),
+            self._stop_tunnel if self.processes.tunnel.running else self._start_tunnel,
+            danger=self.processes.tunnel.running,
         )
-        for index, button in enumerate(tunnel_actions):
-            controls.grid_columnconfigure(index, weight=1, uniform="tunnel-actions")
-            button.grid(
-                row=0,
-                column=index,
-                padx=(0 if index == 0 else 4, 0 if index == len(tunnel_actions) - 1 else 4),
-                sticky="ew",
-            )
+        controls.grid_columnconfigure(0, weight=1)
+        start_button.grid(row=0, column=0, sticky="ew")
 
         _, status_body = self._card(
             page,
@@ -1300,21 +1288,6 @@ class LocalRepoMCPApp(ctk.CTk):
             ),
             on_success=success,
         )
-
-    def _detect_tunnel(self) -> None:
-        cfg = self._collect_config()
-        if cfg:
-            self._background(lambda: self.tunnel.detect(cfg), on_success=self._show_result)
-
-    def _init_tunnel(self) -> None:
-        cfg = self._save()
-        if cfg:
-            self._background(lambda: self.tunnel.init_profile(cfg), on_success=self._show_result)
-
-    def _doctor_tunnel(self) -> None:
-        cfg = self._collect_config()
-        if cfg:
-            self._background(lambda: self.tunnel.doctor(cfg), on_success=self._show_result)
 
     def _start_tunnel(self) -> None:
         cfg = self._save()
