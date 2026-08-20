@@ -28,6 +28,7 @@ def test_test_artifact_settings_persist_and_export(tmp_path: Path, monkeypatch) 
             max_test_images=4,
             max_test_image_bytes=1_500_000,
             max_test_image_total_bytes=3_000_000,
+            max_read_image_bytes=4_000_000,
         )
     )
     loaded = config_module.load_config()
@@ -36,11 +37,13 @@ def test_test_artifact_settings_persist_and_export(tmp_path: Path, monkeypatch) 
     assert loaded.max_test_images == 4
     assert loaded.max_test_image_bytes == 1_500_000
     assert loaded.max_test_image_total_bytes == 3_000_000
+    assert loaded.max_read_image_bytes == 4_000_000
     environment = loaded.mcp_env()
     assert environment["TEST_ARTIFACT_DIR"] == "qa-artifacts/screens"
     assert environment["MAX_TEST_IMAGES"] == "4"
     assert environment["MAX_TEST_IMAGE_BYTES"] == "1500000"
     assert environment["MAX_TEST_IMAGE_TOTAL_BYTES"] == "3000000"
+    assert environment["MAX_READ_IMAGE_BYTES"] == "4000000"
 
 
 def test_test_artifact_settings_reject_unsafe_or_excessive_values() -> None:
@@ -49,6 +52,7 @@ def test_test_artifact_settings_reject_unsafe_or_excessive_values() -> None:
         max_test_images=21,
         max_test_image_bytes=9 * 1024 * 1024,
         max_test_image_total_bytes=9 * 1024 * 1024,
+        max_read_image_bytes=9 * 1024 * 1024,
     )
     errors = set(config.validate())
 
@@ -56,6 +60,7 @@ def test_test_artifact_settings_reject_unsafe_or_excessive_values() -> None:
     assert "test_max_images_invalid" in errors
     assert "test_image_max_invalid" in errors
     assert "test_image_total_invalid" in errors
+    assert "read_image_max_invalid" in errors
 
 
 def test_desktop_advanced_settings_bind_all_test_artifact_controls() -> None:
@@ -67,6 +72,7 @@ def test_desktop_advanced_settings_bind_all_test_artifact_controls() -> None:
         "test_max_images_var",
         "test_image_max_kb_var",
         "test_image_total_kb_var",
+        "read_image_max_kb_var",
     ):
         assert token in init_source
         assert token in home_source or token in collect_source
@@ -74,6 +80,7 @@ def test_desktop_advanced_settings_bind_all_test_artifact_controls() -> None:
         "test_max_images",
         "test_image_max_kb",
         "test_image_total_kb",
+        "read_image_max_kb",
         "test_artifact_dir",
     ):
         assert f'self.t("{key}")' in home_source
@@ -95,6 +102,7 @@ def test_user_tunable_test_limits_are_not_environment_only() -> None:
         "MAX_TEST_IMAGES",
         "MAX_TEST_IMAGE_BYTES",
         "MAX_TEST_IMAGE_TOTAL_BYTES",
+        "MAX_READ_IMAGE_BYTES",
     }
     assert expected_environment.issubset(environment)
 
@@ -102,8 +110,9 @@ def test_user_tunable_test_limits_are_not_environment_only() -> None:
         (
             inspect.getsource(LocalRepoMCPApp._init_variables),
             inspect.getsource(LocalRepoMCPApp._build_home),
+            inspect.getsource(LocalRepoMCPApp._build_chatgpt),
             inspect.getsource(LocalRepoMCPApp._collect_config),
         )
     )
-    for token in ("max_file_var", "max_patch_var", "max_search_var", "max_output_var", "test_timeout_var", "log_max_kb_var", "log_backup_var", "test_artifact_dir_var", "test_max_images_var", "test_image_max_kb_var", "test_image_total_kb_var"):
+    for token in ("max_file_var", "max_patch_var", "max_search_var", "max_output_var", "test_timeout_var", "log_max_kb_var", "log_backup_var", "test_artifact_dir_var", "test_max_images_var", "test_image_max_kb_var", "test_image_total_kb_var", "read_image_max_kb_var", "tunnel_http_proxy_var"):
         assert token in source

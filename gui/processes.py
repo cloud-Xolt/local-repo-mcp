@@ -99,6 +99,7 @@ class ManagedProcess:
         self.name = name
         self.process: subprocess.Popen[str] | None = None
         self.started_at: float | None = None
+        self.last_exit_code: int | None = None
         self.logs: deque[str] = deque(maxlen=max_log_lines)
         self._reader: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -137,6 +138,7 @@ class ManagedProcess:
             raise RuntimeError(f"{self.name} is already running")
         if clear_logs:
             self.logs.clear()
+        self.last_exit_code = None
         creationflags = 0
         if os.name == "nt":
             creationflags = (
@@ -175,6 +177,7 @@ class ManagedProcess:
                 break
             self.append_log(line)
         code = process.wait()
+        self.last_exit_code = code
         if code == 0:
             self.append_log(f"[{self.name} exited successfully]")
         else:

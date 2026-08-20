@@ -102,12 +102,15 @@ class LocalRepoMCPApp(ctk.CTk):
         self.token_visible = False
         self._api_key_entry = None
         self._api_key_toggle_btn = None
+        self._tunnel_watch_job: str | None = None
+        self._tunnel_seen_running = False
         self.section_state = {
             "home_http": True,
             "home_advanced": False,
             "server_check": False,
             "server_client": False,
             "chatgpt_auth": False,
+            "chatgpt_advanced": False,
             "about_security": False,
         }
         self.log_channel = "mcp"
@@ -154,6 +157,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self.test_max_images_var = ctk.StringVar(value=str(cfg.max_test_images))
         self.test_image_max_kb_var = ctk.StringVar(value=str(cfg.max_test_image_bytes // 1024))
         self.test_image_total_kb_var = ctk.StringVar(value=str(cfg.max_test_image_total_bytes // 1024))
+        self.read_image_max_kb_var = ctk.StringVar(value=str(cfg.max_read_image_bytes // 1024))
         self.audit_var = ctk.StringVar(value=cfg.audit_log)
         self.mcp_log_var = ctk.StringVar(value=cfg.mcp_log)
         self.log_max_kb_var = ctk.StringVar(value=str(cfg.log_max_bytes // 1000))
@@ -164,12 +168,15 @@ class LocalRepoMCPApp(ctk.CTk):
         self.tunnel_id_var = ctk.StringVar(value=cfg.tunnel_id)
         self.tunnel_profile_var = ctk.StringVar(value=cfg.tunnel_profile)
         self.tunnel_profile_path_var = ctk.StringVar(value=cfg.tunnel_profile_path)
+        self.tunnel_http_proxy_var = ctk.StringVar(value=cfg.tunnel_http_proxy)
         self.api_key_var = ctk.StringVar(value=cfg.control_plane_api_key)
         self.log_query_var = ctk.StringVar(value="")
         self.log_level_var = ctk.StringVar(value="ALL")
         self.log_auto_var = ctk.BooleanVar(value=True)
 
     def _build_shell(self) -> None:
+        self._api_key_entry = None
+        self._api_key_toggle_btn = None
         destroy_children(self)
 
         self.grid_columnconfigure(1, weight=1)
@@ -360,6 +367,9 @@ class LocalRepoMCPApp(ctk.CTk):
 
     def _show_page(self, page: str) -> None:
         log_workspace.cancel(self)
+        self._cancel_tunnel_watch()
+        self._api_key_entry = None
+        self._api_key_toggle_btn = None
         self.current_page = page
         for key, button in self.nav_buttons.items():
             active = key == page
@@ -380,6 +390,39 @@ class LocalRepoMCPApp(ctk.CTk):
             "logs": self._build_logs_center,
             "about": self._build_about,
         }[page]()
+        if page == "chatgpt":
+            self._tunnel_seen_running = self.processes.tunnel.running
+            self._schedule_tunnel_watch()
+
+    def _cancel_tunnel_watch(self) -> None:
+        job = self._tunnel_watch_job
+        if job is None:
+            return
+        try:
+            self.after_cancel(job)
+        except Exception:
+            pass
+        finally:
+            self._tunnel_watch_job = None
+
+    def _schedule_tunnel_watch(self) -> None:
+        if self.current_page != "chatgpt" or self._tunnel_watch_job is not None:
+            return
+        self._tunnel_watch_job = self.after(2000, self._on_tunnel_watch_tick)
+
+    def _on_tunnel_watch_tick(self) -> None:
+        self._tunnel_watch_job = None
+        if self.current_page != "chatgpt":
+            return
+        running = self.processes.tunnel.running
+        if self._tunnel_seen_running and not running:
+            code = self.processes.tunnel.last_exit_code
+            detail = f" (exit {code})" if code is not None else ""
+            self._status(self.t("tunnel_exited_unexpectedly") + detail, "danger")
+            self._show_page("chatgpt")
+            return
+        self._tunnel_seen_running = running
+        self._schedule_tunnel_watch()
 
     def _page(self):
         frame = ctk.CTkScrollableFrame(
@@ -875,13 +918,14 @@ class LocalRepoMCPApp(ctk.CTk):
             self._field(advanced, self.t("test_max_images"), self.test_max_images_var, row=5, column=0)
             self._field(advanced, self.t("test_image_max_kb"), self.test_image_max_kb_var, row=5, column=1)
             self._field(advanced, self.t("test_image_total_kb"), self.test_image_total_kb_var, row=6, column=0)
-            self._field(advanced, self.t("test_artifact_dir"), self.test_artifact_dir_var, row=6, column=1)
+            self._field(advanced, self.t("read_image_max_kb"), self.read_image_max_kb_var, row=6, column=1)
+            self._field(advanced, self.t("test_artifact_dir"), self.test_artifact_dir_var, row=7, columnspan=2)
             warning = ctk.CTkFrame(
                 advanced,
                 fg_color=COLORS["warning_soft"],
                 corner_radius=10,
             )
-            warning.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            warning.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
             ctk.CTkSwitch(
                 warning,
                 text=self.t("dirty_worktree"),
@@ -898,14 +942,14 @@ class LocalRepoMCPApp(ctk.CTk):
                 text_color=COLORS["muted"],
                 font=ctk.CTkFont(size=FONT_SMALL),
             ).pack(anchor="w", padx=12, pady=(0, 11))
-            warning.grid_configure(row=7)
+            warning.grid_configure(row=8)
 
             commit_box = ctk.CTkFrame(
                 advanced,
                 fg_color=COLORS["warning_soft"],
                 corner_radius=10,
             )
-            commit_box.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            commit_box.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(10, 0))
             ctk.CTkSwitch(
                 commit_box,
                 text=self.t("git_commit"),
@@ -1014,11 +1058,28 @@ class LocalRepoMCPApp(ctk.CTk):
         controls.grid_columnconfigure(0, weight=1)
         start_button.grid(row=0, column=0, sticky="ew")
 
+        _, tunnel_advanced = self._collapsible(
+            page,
+            "chatgpt_advanced",
+            self.t("tunnel_advanced"),
+            self.t("tunnel_advanced_hint"),
+            row=1,
+            columnspan=2,
+        )
+        if tunnel_advanced is not None:
+            self._field(
+                tunnel_advanced,
+                self.t("tunnel_http_proxy"),
+                self.tunnel_http_proxy_var,
+                row=0,
+                columnspan=2,
+            )
+
         _, status_body = self._card(
             page,
             self.t("tunnel_status"),
             self.t("tunnel_ready"),
-            row=1,
+            row=2,
             columnspan=2,
         )
         metrics = ctk.CTkFrame(status_body, fg_color="transparent")
@@ -1039,7 +1100,7 @@ class LocalRepoMCPApp(ctk.CTk):
             "chatgpt_auth",
             self.t("auth_boundary"),
             self.t("auth_boundary_hint"),
-            row=2,
+            row=3,
         )
         if auth_body is not None:
             info = ctk.CTkFrame(auth_body, fg_color=COLORS["primary_soft"], corner_radius=10)
@@ -1168,6 +1229,7 @@ class LocalRepoMCPApp(ctk.CTk):
             "test_max_images": (self.test_max_images_var.get(), 1, 20),
             "test_image_max_kb": (self.test_image_max_kb_var.get(), 1, 8192),
             "test_image_total_kb": (self.test_image_total_kb_var.get(), 1, 8192),
+            "read_image_max_kb": (self.read_image_max_kb_var.get(), 1, 8192),
         }
         for field, (raw, low, high) in numeric_fields.items():
             try:
@@ -1227,10 +1289,12 @@ class LocalRepoMCPApp(ctk.CTk):
                 max_test_images=int(self.test_max_images_var.get()),
                 max_test_image_bytes=int(self.test_image_max_kb_var.get()) * 1024,
                 max_test_image_total_bytes=int(self.test_image_total_kb_var.get()) * 1024,
+                max_read_image_bytes=int(self.read_image_max_kb_var.get()) * 1024,
                 tunnel_client_path=self.tunnel_path_var.get().strip() or "tunnel-client",
                 tunnel_id=self.tunnel_id_var.get().strip(),
                 tunnel_profile=self.tunnel_profile_var.get().strip() or "local-repo",
                 tunnel_profile_path=self.tunnel_profile_path_var.get().strip(),
+                tunnel_http_proxy=self.tunnel_http_proxy_var.get().strip(),
                 control_plane_api_key=self.api_key_var.get().strip(),
             )
         except ValueError:
@@ -1303,7 +1367,7 @@ class LocalRepoMCPApp(ctk.CTk):
         if cfg:
             self._background(
                 lambda: self.tunnel.start(cfg),
-                self.t("running"),
+                self.t("tunnel_connected"),
                 rebuild=True,
             )
 
@@ -1404,12 +1468,17 @@ class LocalRepoMCPApp(ctk.CTk):
 
     def _toggle_api_key(self) -> None:
         self.api_key_visible = not self.api_key_visible
-        if self._api_key_entry is not None:
-            self._api_key_entry.configure(show="" if self.api_key_visible else "•")
-        if self._api_key_toggle_btn is not None:
-            self._api_key_toggle_btn.configure(
-                text="🙈" if self.api_key_visible else "👁",
-            )
+        entry = self._api_key_entry
+        button = self._api_key_toggle_btn
+        if entry is None or button is None:
+            return
+        try:
+            if not entry.winfo_exists():
+                return
+        except Exception:
+            return
+        entry.configure(show="" if self.api_key_visible else "•")
+        button.configure(text="🙈" if self.api_key_visible else "👁")
 
     def _browse_repo(self) -> None:
         path = filedialog.askdirectory(initialdir=self.repo_var.get() or str(ROOT))

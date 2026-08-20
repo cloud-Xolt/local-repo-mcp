@@ -22,6 +22,36 @@ def test_reject_binary_file(repo_root: Path) -> None:
         fs.read_file("src/bin.dat")
 
 
+def test_read_png_image(repo_root: Path) -> None:
+    png = repo_root / "src" / "shot.png"
+    png.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01"
+        b"\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00"
+        b"\x1f\x15\xc4\x89"
+        b"\x00\x00\x00\x0bIDAT"
+        b"\x08\xd7c`\x00\x00"
+        b"\x00\x02\x00\x01"
+        b"\xe2!\xbc3"
+        b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    fs = RepoFilesystem(repo_root, max_file_bytes=1000)
+    result = fs.read_file("src/shot.png")
+    assert result["content_type"] == "image"
+    assert result["mime_type"] == "image/png"
+    assert result["content_base64"]
+
+
+def test_list_files_includes_png(repo_root: Path) -> None:
+    png = repo_root / "src" / "shot.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    fs = RepoFilesystem(repo_root, max_file_bytes=1000)
+    result = fs.list_files(TraversalOptions(path="src", limit=20))
+    assert "src/shot.png" in result["files"]
+
+
 def test_reject_non_utf8(repo_root: Path) -> None:
     bad = repo_root / "src" / "bad.txt"
     bad.write_bytes(b"\xff\xfe")

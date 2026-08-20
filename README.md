@@ -92,7 +92,7 @@ Test mode executes repository code with the current operating-system user's perm
 | Tool | Purpose |
 | --- | --- |
 | `repo_list_files` | List allowed files under the configured repository. |
-| `repo_read_file` | Read one allowed UTF-8 text file. |
+| `repo_read_file` | Read one allowed UTF-8 text file; PNG/JPEG return as MCP image content. |
 | `repo_search_code` | Perform bounded fixed-string repository search. |
 | `repo_git_status` | Return filtered Git worktree status. |
 | `repo_git_diff` | Return a bounded, filtered Git diff. |

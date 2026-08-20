@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from typing import Any
+
+from mcp.types import CallToolResult, ImageContent, TextContent
 
 from repo.file_scope import TraversalOptions
 from repo.search import search_repository
@@ -8,6 +11,7 @@ from tools.contracts import (
     GitDiffResult,
     GitStatusResult,
     ListFilesResult,
+    ReadFileCallToolResult,
     ReadFileResult,
     SearchCodeResult,
 )
@@ -15,6 +19,25 @@ from tools.execution import execute
 from tools.runtime import RuntimeContext, repository_info
 
 READ_MODES = ("read", "write", "test")
+
+
+def _present_read_file(result: dict[str, Any]) -> ReadFileResult | ReadFileCallToolResult:
+    if result.get("content_type") != "image":
+        return result  # type: ignore[return-value]
+    mime_type = result["mime_type"]
+    encoded = result["content_base64"]
+    summary = {key: value for key, value in result.items() if key != "content_base64"}
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(summary, ensure_ascii=False),
+            ),
+            ImageContent(type="image", data=encoded, mime_type=mime_type),
+        ],
+        structured_content=result,
+        is_error=False,
+    )
 
 
 def _normalize_patterns(values: list[str] | None) -> tuple[str, ...]:
@@ -110,7 +133,7 @@ def register_read_tools(context: RuntimeContext) -> None:
         return result
 
     @context.mcp.tool()
-    def repo_read_file(path: str) -> ReadFileResult:
+    def repo_read_file(path: str) -> ReadFileResult | ReadFileCallToolResult:
         result = execute(
             context,
             tool="repo_read_file",
@@ -119,7 +142,7 @@ def register_read_tools(context: RuntimeContext) -> None:
             target=path,
         )
         result["repository"] = repository_info(context)
-        return result
+        return _present_read_file(result)
 
     @context.mcp.tool()
     def repo_search_code(

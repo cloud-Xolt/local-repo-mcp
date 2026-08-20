@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import base64
 import fnmatch
+import os
 from pathlib import Path
+
+READ_IMAGE_TYPES: dict[str, tuple[str, bytes]] = {
+    ".png": ("image/png", b"\x89PNG\r\n\x1a\n"),
+    ".jpg": ("image/jpeg", b"\xff\xd8\xff"),
+    ".jpeg": ("image/jpeg", b"\xff\xd8\xff"),
+}
+_DEFAULT_MAX_READ_IMAGE_BYTES = 5 * 1024 * 1024
+_HARD_MAX_READ_IMAGE_BYTES = 8 * 1024 * 1024
 
 READ_DENY_PATTERNS = (
     ".git",
@@ -123,3 +133,38 @@ def read_text_file(path: Path, max_bytes: int) -> tuple[str, int]:
         return raw.decode("utf-8"), size
     except UnicodeDecodeError as exc:
         raise PermissionError("file is not valid UTF-8 text") from exc
+
+
+def max_read_image_bytes() -> int:
+    raw = os.environ.get("MAX_READ_IMAGE_BYTES", "").strip()
+    if not raw:
+        return _DEFAULT_MAX_READ_IMAGE_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_READ_IMAGE_BYTES
+    if value <= 0:
+        return _DEFAULT_MAX_READ_IMAGE_BYTES
+    return min(value, _HARD_MAX_READ_IMAGE_BYTES)
+
+
+def is_supported_read_image(path: Path) -> bool:
+    return path.suffix.lower() in READ_IMAGE_TYPES
+
+
+def read_image_file(path: Path) -> tuple[str, str, int]:
+    if path.is_symlink():
+        raise PermissionError("symbolic links are not allowed")
+    image_type = READ_IMAGE_TYPES.get(path.suffix.lower())
+    if image_type is None:
+        raise PermissionError("binary files are not supported")
+    mime_type, signature = image_type
+    size = path.stat().st_size
+    max_bytes = max_read_image_bytes()
+    if size > max_bytes:
+        raise PermissionError(f"file exceeds limit: {size} > {max_bytes}")
+    raw = path.read_bytes()
+    if raw[: len(signature)] != signature:
+        raise PermissionError(f"file signature does not match {mime_type}")
+    encoded = base64.b64encode(raw).decode("ascii")
+    return mime_type, encoded, size

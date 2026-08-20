@@ -59,6 +59,7 @@ class LocalRepoMCPApp(BaseApplication):
             "server_check": False,
             "server_client": False,
             "chatgpt_auth": False,
+            "chatgpt_advanced": False,
             "about_security": False,
         }
         self.log_channel = "mcp"

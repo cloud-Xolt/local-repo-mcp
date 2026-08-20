@@ -107,11 +107,13 @@ class AppConfig:
     max_test_images: int = 6
     max_test_image_bytes: int = 5 * 1024 * 1024
     max_test_image_total_bytes: int = 2 * 1024 * 1024
+    max_read_image_bytes: int = 5 * 1024 * 1024
 
     tunnel_client_path: str = "tunnel-client"
     tunnel_id: str = ""
     tunnel_profile: str = "local-repo"
     tunnel_profile_path: str = ""
+    tunnel_http_proxy: str = ""
 
     control_plane_api_key: str = field(default="", repr=False, compare=False)
     http_auth_token: str = field(default="", repr=False, compare=False)
@@ -184,6 +186,7 @@ class AppConfig:
             (self.max_test_images, "test_max_images_invalid", 1, 20),
             (self.max_test_image_bytes, "test_image_max_invalid", 1, 8 * 1024 * 1024),
             (self.max_test_image_total_bytes, "test_image_total_invalid", 1, 8 * 1024 * 1024),
+            (self.max_read_image_bytes, "read_image_max_invalid", 1, 8 * 1024 * 1024),
         ):
             if not isinstance(value, int) or not low <= value <= high:
                 errors.append(key)
@@ -283,6 +286,7 @@ class AppConfig:
             "MAX_TEST_IMAGES": str(self.max_test_images),
             "MAX_TEST_IMAGE_BYTES": str(self.max_test_image_bytes),
             "MAX_TEST_IMAGE_TOTAL_BYTES": str(self.max_test_image_total_bytes),
+            "MAX_READ_IMAGE_BYTES": str(self.max_read_image_bytes),
             "HTTP_HOST": self.http_host.strip() or "127.0.0.1",
             "HTTP_PORT": str(self.http_port),
             "HTTP_PATH": self.http_path.strip() or "/mcp",

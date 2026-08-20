@@ -92,7 +92,7 @@ Test 模式会以当前操作系统用户权限执行仓库代码。该模式不
 | 工具 | 作用 |
 | --- | --- |
 | `repo_list_files` | 列出指定仓库范围内允许访问的文件。 |
-| `repo_read_file` | 读取一个允许访问的 UTF-8 文本文件。 |
+| `repo_read_file` | 读取允许访问的 UTF-8 文本文件；PNG/JPEG 以 MCP 图片内容返回。 |
 | `repo_search_code` | 执行有数量和输出限制的固定字符串检索。 |
 | `repo_git_status` | 返回经过敏感路径过滤的 Git 工作区状态。 |
 | `repo_git_diff` | 返回经过过滤和大小限制的 Git Diff。 |

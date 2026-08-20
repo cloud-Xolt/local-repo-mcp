@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from repo.file_scope import RepoFileScope, TraversalOptions
-from security.guard import read_text_file, validate_read_path, validate_write_path
+from security.guard import (
+    is_supported_read_image,
+    max_read_image_bytes,
+    read_image_file,
+    read_text_file,
+    validate_read_path,
+    validate_write_path,
+)
 
 
 class RepoFilesystem:
@@ -33,10 +40,21 @@ class RepoFilesystem:
         target, relative = validate_read_path(self.repo_root, path)
         if not target.is_file():
             raise FileNotFoundError(path)
+        if is_supported_read_image(target):
+            mime_type, encoded, size = read_image_file(target)
+            return {
+                "path": relative,
+                "bytes": size,
+                "content_type": "image",
+                "mime_type": mime_type,
+                "content_base64": encoded,
+                "content_trust": "untrusted_repository_data",
+            }
         content, size = read_text_file(target, self.max_file_bytes)
         return {
             "path": relative,
             "bytes": size,
+            "content_type": "text",
             "content": content,
             "content_trust": "untrusted_repository_data",
         }

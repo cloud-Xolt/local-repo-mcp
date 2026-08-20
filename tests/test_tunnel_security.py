@@ -2,6 +2,7 @@ import secrets
 import sys
 
 import pytest
+import yaml
 from pathlib import Path
 
 from gui.config import AppConfig
@@ -41,6 +42,10 @@ def test_start_prepares_profile_before_run(tmp_path, monkeypatch) -> None:
     profile_dir = tmp_path / "tunnel-client"
     profile_dir.mkdir()
     profile = profile_dir / "local-repo.yaml"
+    profile.write_text(
+        "health:\n  listen_addr: 127.0.0.1:9090\n",
+        encoding="utf-8",
+    )
     calls: list[list[str]] = []
 
     def fake_run(command, **kwargs):
@@ -55,6 +60,10 @@ def test_start_prepares_profile_before_run(tmp_path, monkeypatch) -> None:
             profile.write_text("mcp: {}\n", encoding="utf-8")
             return Result()
         if command[1] == "doctor":
+            return Result()
+        if command[1] == "admin":
+            return Result()
+        if command[1] == "health":
             return Result()
         if command[1] == "run":
             return Result()
@@ -72,6 +81,7 @@ def test_start_prepares_profile_before_run(tmp_path, monkeypatch) -> None:
         "ensure_process_stable",
         lambda self, process: None,
     )
+    monkeypatch.setattr(tm.TunnelManager, "wait_control_plane_ready", lambda self, config: "ok")
 
     started: list[list[str]] = []
 
@@ -90,8 +100,176 @@ def test_start_prepares_profile_before_run(tmp_path, monkeypatch) -> None:
     manager = tm.TunnelManager(tm.ProcessManager())
     manager.start(config)
 
-    assert [part[1] for part in calls] == ["--version", "init", "doctor"]
+    assert [part[1] for part in calls] == [
+        "--version",
+        "doctor",
+        "admin",
+    ]
     assert started == [["tunnel-client", "run", "--profile", "local-repo"]]
+
+
+def test_sync_profile_tunnel_id_updates_mismatch(tmp_path, monkeypatch) -> None:
+    profile_dir = tmp_path / "tunnel-client"
+    profile_dir.mkdir()
+    profile = profile_dir / "local-repo.yaml"
+    profile.write_text(
+        "control_plane:\n  tunnel_id: tunnel_old\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tm, "_profile_base_dir", lambda: profile_dir)
+    config = AppConfig(
+        repo_root=".",
+        tunnel_profile="local-repo",
+        tunnel_id="tunnel_new",
+        transport="stdio",
+    )
+    manager = tm.TunnelManager(tm.ProcessManager())
+    message = manager.sync_profile_tunnel_id(config)
+    assert message is not None
+    assert "tunnel_old" in message
+    assert "tunnel_new" in message
+    saved = yaml.safe_load(profile.read_text(encoding="utf-8"))
+    assert saved["control_plane"]["tunnel_id"] == "tunnel_new"
+
+
+def test_sync_profile_tunnel_id_noop_when_matching(tmp_path, monkeypatch) -> None:
+    profile_dir = tmp_path / "tunnel-client"
+    profile_dir.mkdir()
+    profile = profile_dir / "local-repo.yaml"
+    profile.write_text(
+        "control_plane:\n  tunnel_id: tunnel_same\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tm, "_profile_base_dir", lambda: profile_dir)
+    config = AppConfig(
+        repo_root=".",
+        tunnel_profile="local-repo",
+        tunnel_id="tunnel_same",
+        transport="stdio",
+    )
+    manager = tm.TunnelManager(tm.ProcessManager())
+    assert manager.sync_profile_tunnel_id(config) is None
+
+
+def test_verify_control_plane_credentials_rejects_invalid_key(
+    tmp_path, monkeypatch
+) -> None:
+    profile_dir = tmp_path / "tunnel-client"
+    profile_dir.mkdir()
+
+    def fake_run(command, **kwargs):
+        class Result:
+            returncode = 1
+            stdout = ""
+            stderr = "401 Unauthorized: invalid API key"
+        return Result()
+
+    monkeypatch.setattr(tm.subprocess, "run", fake_run)
+    monkeypatch.setattr(tm, "_profile_base_dir", lambda: profile_dir)
+    monkeypatch.setattr(
+        tm.TunnelManager,
+        "resolve_executable",
+        lambda self, config: "tunnel-client",
+    )
+    config = AppConfig(
+        repo_root=".",
+        tunnel_profile="local-repo",
+        tunnel_id="tunnel_test",
+        control_plane_api_key="bad-key",
+        transport="stdio",
+    )
+    manager = tm.TunnelManager(tm.ProcessManager())
+    with pytest.raises(tm.ControlPlaneCLIError, match="rejected by the OpenAI control plane"):
+        manager.verify_control_plane_credentials(config)
+
+
+def test_verify_control_plane_credentials_reports_network_error(
+    tmp_path, monkeypatch
+) -> None:
+    profile_dir = tmp_path / "tunnel-client"
+    profile_dir.mkdir()
+    attempts = {"count": 0}
+
+    def fake_run(command, **kwargs):
+        attempts["count"] += 1
+        class Result:
+            returncode = 1
+            stdout = ""
+            stderr = (
+                'Get "https://api.openai.com/v1/tunnels/tunnel_test": '
+                "dial tcp 108.160.167.165:443: connectex: connection attempt failed"
+            )
+        return Result()
+
+    monkeypatch.setattr(tm.subprocess, "run", fake_run)
+    monkeypatch.setattr(tm.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(tm, "_profile_base_dir", lambda: profile_dir)
+    monkeypatch.setattr(
+        tm.TunnelManager,
+        "resolve_executable",
+        lambda self, config: "tunnel-client",
+    )
+    config = AppConfig(
+        repo_root=".",
+        tunnel_profile="local-repo",
+        tunnel_id="tunnel_test",
+        control_plane_api_key="secret",
+        transport="stdio",
+    )
+    manager = tm.TunnelManager(tm.ProcessManager())
+    with pytest.raises(tm.ControlPlaneCLIError, match="network or proxy issue"):
+        manager.verify_control_plane_credentials(config)
+    assert attempts["count"] == 3
+
+
+def test_runtime_env_omits_proxy_when_unconfigured(monkeypatch) -> None:
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    config = AppConfig(
+        repo_root=".",
+        control_plane_api_key="secret",
+    )
+    env = tm.TunnelManager._runtime_env(config)
+    assert "HTTPS_PROXY" not in env
+    assert "HTTP_PROXY" not in env
+
+
+def test_runtime_env_uses_configured_tunnel_proxy(monkeypatch) -> None:
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    config = AppConfig(
+        repo_root=".",
+        control_plane_api_key="secret",
+        tunnel_http_proxy="http://127.0.0.1:7897",
+    )
+    env = tm.TunnelManager._runtime_env(config)
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+    assert env["HTTP_PROXY"] == "http://127.0.0.1:7897"
+
+
+def test_runtime_env_respects_existing_https_proxy(monkeypatch) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:8888")
+    config = AppConfig(
+        repo_root=".",
+        control_plane_api_key="secret",
+        tunnel_http_proxy="http://127.0.0.1:7897",
+    )
+    env = tm.TunnelManager._runtime_env(config)
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:8888"
+    assert "HTTP_PROXY" not in env or env.get("HTTP_PROXY") != "http://127.0.0.1:7897"
+
+
+def test_health_base_url_reads_profile_listen_addr(tmp_path, monkeypatch) -> None:
+    profile_dir = tmp_path / "tunnel-client"
+    profile_dir.mkdir()
+    profile = profile_dir / "local-repo.yaml"
+    profile.write_text(
+        "health:\n  listen_addr: 127.0.0.1:9090\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tm, "_profile_base_dir", lambda: profile_dir)
+    config = AppConfig(repo_root=".", tunnel_profile="local-repo", transport="stdio")
+    assert tm.TunnelManager.health_base_url(config) == "http://127.0.0.1:9090"
 
 
 def test_repair_profile_command_rewrites_broken_yaml(tmp_path, monkeypatch) -> None:

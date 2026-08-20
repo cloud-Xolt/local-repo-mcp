@@ -43,10 +43,13 @@ def test_read_file_rejects_binary_and_non_utf8(tmp_path: Path) -> None:
     fs = RepoFilesystem(tmp_path, 1000)
     (tmp_path / "binary.bin").write_bytes(b"abc\x00def")
     (tmp_path / "bad.txt").write_bytes(b"\xff\xfe")
+    (tmp_path / "fake.png").write_bytes(b"not-a-png\x00")
     with pytest.raises(PermissionError):
         fs.read_file("binary.bin")
     with pytest.raises(PermissionError):
         fs.read_file("bad.txt")
+    with pytest.raises(PermissionError):
+        fs.read_file("fake.png")
 
 
 def test_list_skips_symlinks_and_sensitive_files(tmp_path: Path) -> None:

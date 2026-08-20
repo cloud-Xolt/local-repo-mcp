@@ -5,10 +5,6 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 from mcp.types import CallToolResult
 from pydantic import BaseModel, ConfigDict
 
-
-from typing_extensions import TypedDict as _CompatTypedDict
-TypedDict = _CompatTypedDict
-
 EXPECTED_TOOL_NAMES = frozenset(
     {
         "repo_list_files",
@@ -38,9 +34,30 @@ class ListFilesResult(TypedDict):
 class ReadFileResult(TypedDict):
     path: str
     bytes: int
-    content: str
+    content_type: Literal["text", "image"]
     content_trust: Literal["untrusted_repository_data"]
     repository: RepositoryRef
+    content: NotRequired[str]
+    mime_type: NotRequired[Literal["image/png", "image/jpeg"]]
+    content_base64: NotRequired[str]
+
+
+class ReadFileResultModel(BaseModel):
+    """Wire contract for repo_read_file structuredContent."""
+
+    model_config = ConfigDict(extra="allow")
+
+    path: str
+    bytes: int
+    content_type: Literal["text", "image"]
+    content_trust: Literal["untrusted_repository_data"]
+    repository: RepositoryRef
+    content: str | None = None
+    mime_type: Literal["image/png", "image/jpeg"] | None = None
+    content_base64: str | None = None
+
+
+ReadFileCallToolResult = Annotated[CallToolResult, ReadFileResultModel]
 
 
 class SearchMatch(TypedDict):

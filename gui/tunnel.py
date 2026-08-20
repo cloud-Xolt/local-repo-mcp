@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,12 @@ from gui.processes import ProcessManager
 from mcp_app.runtime import launcher_command
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class ControlPlaneCLIError(RuntimeError):
+    def __init__(self, output: str) -> None:
+        self.output = output
+        super().__init__(TunnelManager._control_plane_error_message(output))
 
 
 def _resolve_python(python: Path | None = None) -> Path:
@@ -109,6 +116,55 @@ class TunnelManager:
         profile = config.tunnel_profile.strip() or "local-repo"
         return _profile_base_dir() / f"{profile}.yaml"
 
+    @staticmethod
+    def profile_tunnel_id(config: AppConfig) -> str:
+        path = TunnelManager.profile_path(config)
+        if not path.is_file():
+            return ""
+        try:
+            payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+        control_plane = payload.get("control_plane")
+        if not isinstance(control_plane, dict):
+            return ""
+        return str(control_plane.get("tunnel_id", "")).strip()
+
+    def sync_profile_tunnel_id(self, config: AppConfig) -> str | None:
+        expected = config.tunnel_id.strip()
+        if not expected:
+            raise ValueError("Tunnel ID is required")
+        path = self.profile_path(config)
+        if not path.is_file():
+            return None
+        original = path.read_text(encoding="utf-8")
+        try:
+            payload = yaml.safe_load(original)
+        except yaml.YAMLError as exc:
+            raise RuntimeError(f"invalid tunnel profile YAML: {path}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("tunnel profile must contain a YAML mapping")
+        control_plane = payload.get("control_plane")
+        if not isinstance(control_plane, dict):
+            control_plane = {}
+            payload["control_plane"] = control_plane
+        current = str(control_plane.get("tunnel_id", "")).strip()
+        if current == expected:
+            return None
+        control_plane["tunnel_id"] = expected
+        rendered = yaml.safe_dump(
+            payload,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+        _write_atomic(path, rendered)
+        message = f"Profile tunnel_id updated: {current or '(empty)'} -> {expected}"
+        self._record("Synced Tunnel ID in profile", message)
+        return message
+
     def repair_profile_command(self, config: AppConfig) -> bool:
         if config.transport != "stdio":
             return False
@@ -182,7 +238,197 @@ class TunnelManager:
             raise ValueError("CONTROL_PLANE_API_KEY is required")
         environment = os.environ.copy()
         environment["CONTROL_PLANE_API_KEY"] = api_key
+        proxy = config.tunnel_http_proxy.strip()
+        if proxy and not environment.get("HTTPS_PROXY") and not environment.get("https_proxy"):
+            environment["HTTPS_PROXY"] = proxy
+            environment["HTTP_PROXY"] = proxy
         return environment
+
+    @staticmethod
+    def _is_network_error(output: str) -> bool:
+        lowered = output.lower()
+        return any(
+            token in lowered
+            for token in (
+                "dial tcp",
+                "connectex",
+                "connection attempt failed",
+                "connection refused",
+                "connection reset",
+                "connection timed out",
+                "i/o timeout",
+                "no such host",
+                "network is unreachable",
+                "failed to respond",
+                "tls handshake timeout",
+                "proxyconnect",
+                "temporary failure in name resolution",
+            )
+        )
+
+    @staticmethod
+    def _is_auth_error(output: str) -> bool:
+        lowered = output.lower()
+        return any(
+            token in lowered
+            for token in (
+                "401",
+                "403",
+                "unauthorized",
+                "invalid api key",
+                "authentication",
+                "permission denied",
+            )
+        )
+
+    @classmethod
+    def _control_plane_error_message(cls, output: str) -> str:
+        if cls._is_auth_error(output):
+            return (
+                "Runtime API Key was rejected by the OpenAI control plane. "
+                "Check the key and Tunnel ID."
+            )
+        if cls._is_network_error(output):
+            return (
+                "Cannot reach the OpenAI control plane (api.openai.com). "
+                "This is a network or proxy issue, not proof that the API Key is wrong. "
+                "Check VPN/proxy, firewall rules, or Tunnel HTTP proxy in GUI advanced settings."
+            )
+        cleaned = output.strip()
+        return cleaned or "control plane verification failed"
+
+    def _run_cli(
+        self,
+        config: AppConfig,
+        args: list[str],
+        *,
+        timeout: float,
+        action: str,
+    ) -> str:
+        result = subprocess.run(
+            [self.resolve_executable(config), *args],
+            env=self._runtime_env(config),
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+            shell=False,
+        )
+        output = "\n".join(
+            part for part in (result.stdout.strip(), result.stderr.strip()) if part
+        )
+        if result.returncode != 0:
+            self._record(f"{action} failed", output)
+            raise ControlPlaneCLIError(output)
+        return output or action
+
+    @staticmethod
+    def health_base_url(config: AppConfig) -> str:
+        path = TunnelManager.profile_path(config)
+        if path.is_file():
+            try:
+                payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+            except yaml.YAMLError:
+                payload = None
+            if isinstance(payload, dict):
+                health = payload.get("health")
+                if isinstance(health, dict):
+                    listen = str(health.get("listen_addr", "")).strip()
+                    if listen:
+                        if listen.startswith(("http://", "https://")):
+                            return listen.rstrip("/")
+                        return f"http://{listen}"
+        return "http://127.0.0.1:8080"
+
+    def verify_control_plane_credentials(self, config: AppConfig) -> str:
+        tunnel_id = config.tunnel_id.strip()
+        if not tunnel_id:
+            raise ValueError("Tunnel ID is required")
+        last_error = ""
+        for attempt in range(3):
+            try:
+                output = self._run_cli(
+                    config,
+                    ["admin", "tunnels", "get", tunnel_id],
+                    timeout=30,
+                    action="Control plane credential verification",
+                )
+                self._record("Control plane credentials verified", output)
+                return output
+            except ControlPlaneCLIError as exc:
+                last_error = str(exc)
+                if attempt >= 2 or not self._is_network_error(exc.output):
+                    raise
+                self._record(
+                    "Control plane credential verification retry",
+                    f"attempt {attempt + 2}/3 after network error",
+                )
+                time.sleep(2)
+        raise RuntimeError(last_error or "control plane verification failed")
+
+    def _tunnel_log_tail(self, *, lines: int = 30) -> str:
+        tail = list(self.processes.tunnel.logs)[-lines:]
+        return "\n".join(tail) if tail else "(no tunnel log output)"
+
+    def wait_control_plane_ready(
+        self,
+        config: AppConfig,
+        *,
+        timeout: float = 180,
+        poll_interval: float = 3,
+        warmup: float = 5,
+    ) -> str:
+        base_url = self.health_base_url(config)
+        if warmup > 0:
+            time.sleep(warmup)
+        deadline = time.monotonic() + timeout
+        last_output = ""
+        while time.monotonic() < deadline:
+            result = subprocess.run(
+                [
+                    self.resolve_executable(config),
+                    "health",
+                    "--url",
+                    base_url,
+                    "--require-control-plane-poll",
+                ],
+                env=self._runtime_env(config),
+                cwd=ROOT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                timeout=15,
+                check=False,
+                shell=False,
+            )
+            last_output = "\n".join(
+                part for part in (result.stdout.strip(), result.stderr.strip()) if part
+            )
+            if result.returncode == 0:
+                self._record("Control plane poll verified", last_output)
+                return last_output
+            time.sleep(poll_interval)
+        self.processes.tunnel.stop()
+        self._record("Control plane poll verification failed", last_output)
+        profile_id = self.profile_tunnel_id(config)
+        gui_id = config.tunnel_id.strip()
+        mismatch = ""
+        if profile_id and gui_id and profile_id != gui_id:
+            mismatch = (
+                f"Tunnel ID mismatch: GUI={gui_id}, profile={profile_id}\n\n"
+            )
+        raise RuntimeError(
+            "Tunnel started locally but did not connect to the OpenAI control plane "
+            "within the wait window.\n\n"
+            f"{mismatch}{last_output}\n\n"
+            "If API Key verification passed just before start, check the Tunnel log "
+            "for control-plane auth or MCP startup errors.\n\n"
+            f"Recent tunnel log:\n{self._tunnel_log_tail()}"
+        )
 
     def init_profile(self, config: AppConfig) -> str:
         if config.transport != "stdio":
@@ -269,7 +515,12 @@ class TunnelManager:
         messages = [self.version(config)]
         if not self.profile_path(config).is_file():
             messages.append(self.init_profile(config))
+        else:
+            synced = self.sync_profile_tunnel_id(config)
+            if synced:
+                messages.append(synced)
         messages.append(self.doctor(config))
+        messages.append(self.verify_control_plane_credentials(config))
         return "\n\n".join(messages)
 
     def start(self, config: AppConfig) -> None:
@@ -289,3 +540,4 @@ class TunnelManager:
             clear_logs=False,
         )
         self.processes.ensure_process_stable(self.processes.tunnel)
+        self.wait_control_plane_ready(config)

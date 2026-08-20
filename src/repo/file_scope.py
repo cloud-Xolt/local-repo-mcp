@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from repo.git import git_list_files, run_git
-from security.guard import is_read_denied, validate_read_path
+from security.guard import is_read_denied, is_supported_read_image, max_read_image_bytes, validate_read_path
 
 # Always excluded from MCP traversal/search, even when respect_gitignore=false.
 HARD_SKIP_DIR_NAMES = frozenset(
@@ -159,6 +159,8 @@ class RepoFileScope:
             return True
         if stat.st_nlink > 1:
             return True
+        if is_supported_read_image(target):
+            return stat.st_size > max_read_image_bytes()
         if stat.st_size > options.max_file_bytes:
             return True
         return looks_binary(target)
