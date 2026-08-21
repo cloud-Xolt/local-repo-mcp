@@ -45,6 +45,13 @@ chmod +x start_gui.sh
 ./start_gui.sh
 ```
 
+无图形界面时使用交互式命令行：
+
+```bash
+chmod +x start_cli.sh
+./start_cli.sh
+```
+
 启动流程会创建 `.venv`、安装依赖，并在 `requirements.txt` 发生变化时重新同步依赖。
 
 ## 3. 安装包方式启动
@@ -54,6 +61,12 @@ chmod +x start_gui.sh
 ```bash
 pip install .
 local-repo-mcp-gui
+```
+
+无桌面环境：
+
+```bash
+local-repo-mcp-cli
 ```
 
 MCP Server 命令入口为：

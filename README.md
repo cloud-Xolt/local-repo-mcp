@@ -30,6 +30,13 @@ Linux/macOS:
 ./start_gui.sh
 ```
 
+On headless hosts (SSH/servers) use the interactive CLI instead of the GUI:
+
+```bash
+chmod +x start_cli.sh
+./start_cli.sh
+```
+
 The bootstrap script creates `.venv` and refreshes dependencies whenever `requirements.txt` changes.
 
 ## Package entry points
@@ -37,6 +44,7 @@ The bootstrap script creates `.venv` and refreshes dependencies whenever `requir
 ```bash
 pip install .
 local-repo-mcp-gui
+local-repo-mcp-cli
 local-repo-mcp
 ```
 

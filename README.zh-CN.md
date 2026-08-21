@@ -30,6 +30,13 @@ Linux/macOS：
 ./start_gui.sh
 ```
 
+无图形界面（SSH/服务器）时使用交互式命令行：
+
+```bash
+chmod +x start_cli.sh
+./start_cli.sh
+```
+
 启动脚本会创建 `.venv`，并在 `requirements.txt` 变化时自动同步依赖。
 
 ## 安装后的命令入口
@@ -37,6 +44,7 @@ Linux/macOS：
 ```bash
 pip install .
 local-repo-mcp-gui
+local-repo-mcp-cli
 local-repo-mcp
 ```
 

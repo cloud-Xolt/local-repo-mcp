@@ -45,6 +45,13 @@ chmod +x start_gui.sh
 ./start_gui.sh
 ```
 
+On headless hosts, use the interactive CLI:
+
+```bash
+chmod +x start_cli.sh
+./start_cli.sh
+```
+
 The bootstrap process creates `.venv`, installs the required packages, and refreshes dependencies when `requirements.txt` changes.
 
 ## 3. Start after package installation
@@ -54,6 +61,12 @@ Install and launch the GUI:
 ```bash
 pip install .
 local-repo-mcp-gui
+```
+
+Headless / SSH:
+
+```bash
+local-repo-mcp-cli
 ```
 
 The MCP server entry point is:

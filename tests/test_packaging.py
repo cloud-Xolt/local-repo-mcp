@@ -55,6 +55,7 @@ def test_wheel_contains_only_final_runtime_entry_points(tmp_path: Path) -> None:
             metadata_content = archive.read(metadata_name).decode("utf-8")
         assert "local-repo-mcp = mcp_app.launcher:main" in entry_content
         assert "local-repo-mcp-gui = gui.desktop:main" in entry_content
+        assert "local-repo-mcp-cli = gui.cli:main" in entry_content
         assert "Version: 1.4.0" in metadata_content
         assert "Requires-Dist: pytest==" in metadata_content
         assert "Requires-Dist: typing-extensions==4.16.0" in metadata_content

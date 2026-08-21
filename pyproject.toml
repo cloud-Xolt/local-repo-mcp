@@ -26,6 +26,7 @@ test = ["pytest==8.4.2"]
 [project.scripts]
 local-repo-mcp = "mcp_app.launcher:main"
 local-repo-mcp-gui = "gui.desktop:main"
+local-repo-mcp-cli = "gui.cli:main"
 
 [tool.setuptools]
 packages = [
