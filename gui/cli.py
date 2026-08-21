@@ -33,22 +33,25 @@ def _prompt_secret(label: str) -> str:
         return ""
 
 
-def _choose(label: str, options: list[str], current: str) -> str:
+def _choose(label: str, options: list[str], current: str) -> str | None:
     _print(f"{label} (current: {current})")
     for index, option in enumerate(options, start=1):
         mark = "*" if option == current else " "
         _print(f"  {index}) [{mark}] {option}")
-    raw = _prompt("Select number", "")
+    raw = _prompt("Select a single number", "")
     if not raw:
         return current
+    if any(ch.isspace() for ch in raw) or "," in raw:
+        _print("Invalid selection. Enter one number only, e.g. 3")
+        return None
     try:
         index = int(raw)
     except ValueError:
-        _print("Invalid selection.")
-        return current
+        _print("Invalid selection. Enter one number only, e.g. 3")
+        return None
     if not 1 <= index <= len(options):
-        _print("Invalid selection.")
-        return current
+        _print(f"Invalid selection. Choose 1-{len(options)}.")
+        return None
     return options[index - 1]
 
 
@@ -210,21 +213,35 @@ class InteractiveCLI:
         self._persist()
 
     def _set_mode(self) -> None:
-        self.config.mcp_mode = _choose(  # type: ignore[assignment]
+        _print("Modes are exclusive: read < write < test.")
+        _print("test already includes write + read; pick 3 if you need patch and tests.")
+        selected = _choose(
             "Permission mode",
             ["read", "write", "test"],
             self.config.mcp_mode,
         )
+        if selected is None:
+            return
+        if selected == self.config.mcp_mode:
+            _print("Unchanged.")
+            return
+        self.config.mcp_mode = selected  # type: ignore[assignment]
         self._persist(require_repo=False)
 
     def _set_transport(self) -> None:
         if self.processes.mcp.running or self.processes.tunnel.running:
             raise RuntimeError("Stop HTTP MCP and Tunnel before changing transport.")
-        self.config.transport = _choose(  # type: ignore[assignment]
+        selected = _choose(
             "Transport",
             ["stdio", "streamable-http"],
             self.config.transport,
         )
+        if selected is None:
+            return
+        if selected == self.config.transport:
+            _print("Unchanged.")
+            return
+        self.config.transport = selected  # type: ignore[assignment]
         if self.config.transport == "streamable-http":
             self.config.http_auth_mode = "bearer"
             self.config.ensure_http_token()
@@ -299,6 +316,8 @@ class InteractiveCLI:
 
     def _show_logs(self) -> None:
         channel = _choose("Log channel", ["mcp", "tunnel"], "tunnel")
+        if channel is None:
+            return
         process = self.processes.mcp if channel == "mcp" else self.processes.tunnel
         lines = process.snapshot()[-40:]
         if not lines:

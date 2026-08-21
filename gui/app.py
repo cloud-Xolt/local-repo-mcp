@@ -1520,7 +1520,7 @@ class LocalRepoMCPApp(ctk.CTk):
         env = cfg.mcp_env()
         env["MCP_TRANSPORT"] = "stdio"
         env.pop("HTTP_AUTH_TOKEN", None)
-        command = launcher_command(sys.executable)
+        command = launcher_command()
         return json.dumps(
             {
                 "mcpServers": {

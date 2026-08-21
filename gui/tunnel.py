@@ -14,7 +14,7 @@ import yaml
 
 from gui.config import AppConfig
 from gui.processes import ProcessManager
-from mcp_app.runtime import launcher_command
+from mcp_app.runtime import launcher_command, resolve_runtime_python
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,12 +26,7 @@ class ControlPlaneCLIError(RuntimeError):
 
 
 def _resolve_python(python: Path | None = None) -> Path:
-    if python is not None:
-        return python.expanduser().resolve()
-    venv_python = ROOT / ".venv" / (
-        "Scripts/python.exe" if os.name == "nt" else "bin/python"
-    )
-    return venv_python.resolve() if venv_python.is_file() else Path(sys.executable).resolve()
+    return resolve_runtime_python(python)
 
 
 def _profile_base_dir() -> Path:

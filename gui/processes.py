@@ -5,7 +5,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import threading
 import time
 from collections import deque
@@ -287,7 +286,7 @@ class ProcessManager:
         environment.update(environment_for(config))
         environment["MCP_TRANSPORT"] = "streamable-http"
         self.mcp.start(
-            launcher_command(sys.executable),
+            launcher_command(),
             env=environment,
             cwd=ROOT,
         )
