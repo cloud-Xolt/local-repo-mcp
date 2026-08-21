@@ -222,6 +222,13 @@ def test_verify_control_plane_credentials_reports_network_error(
     assert attempts["count"] == 3
 
 
+def test_control_plane_prefers_network_over_generic_403() -> None:
+    message = tm.TunnelManager._control_plane_error_message(
+        'Get "https://api.openai.com/v1/tunnels/x": dial tcp: i/o timeout\n403 Forbidden'
+    )
+    assert "network or proxy issue" in message
+
+
 def test_runtime_env_omits_proxy_when_unconfigured(monkeypatch) -> None:
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
     monkeypatch.delenv("https_proxy", raising=False)

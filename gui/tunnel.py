@@ -271,23 +271,28 @@ class TunnelManager:
                 "403",
                 "unauthorized",
                 "invalid api key",
-                "authentication",
+                "invalid_api_key",
+                "authentication failed",
+                "authentication error",
                 "permission denied",
             )
         )
 
     @classmethod
     def _control_plane_error_message(cls, output: str) -> str:
-        if cls._is_auth_error(output):
-            return (
-                "Runtime API Key was rejected by the OpenAI control plane. "
-                "Check the key and Tunnel ID."
-            )
+        # Prefer network classification when both signals appear (common behind
+        # captive portals / regional blocks that return opaque 403 HTML).
         if cls._is_network_error(output):
             return (
                 "Cannot reach the OpenAI control plane (api.openai.com). "
                 "This is a network or proxy issue, not proof that the API Key is wrong. "
-                "Check VPN/proxy, firewall rules, or Tunnel HTTP proxy in GUI advanced settings."
+                "Check VPN/proxy, firewall rules, or set Tunnel HTTP proxy in tunnel-cfg."
+            )
+        if cls._is_auth_error(output):
+            return (
+                "Runtime API Key was rejected by the OpenAI control plane. "
+                "Use the Tunnel Runtime API Key (not a normal sk- OpenAI API key), "
+                "and ensure it belongs to the same Tunnel ID."
             )
         cleaned = output.strip()
         return cleaned or "control plane verification failed"

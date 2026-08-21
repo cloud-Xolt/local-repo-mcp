@@ -6,8 +6,9 @@ from pathlib import Path
 
 from gui.config import load_config, save_config
 from gui.connection import run_connection_test
+from gui.log_safety import redact_log_text
 from gui.processes import ProcessManager, format_uptime
-from gui.tunnel import TunnelManager
+from gui.tunnel import ControlPlaneCLIError, TunnelManager
 from repo.worktree import inspect_worktree
 
 
@@ -129,6 +130,13 @@ class InteractiveCLI:
                     continue
                 try:
                     action()
+                except ControlPlaneCLIError as exc:
+                    _print(f"Error: {exc}")
+                    detail = redact_log_text(exc.output).strip()
+                    if detail:
+                        _print("Detail:")
+                        _print(detail)
+                    _print("Tip: menu 8 → tunnel for recent tunnel-client output.")
                 except Exception as exc:
                     _print(f"Error: {exc}")
         except KeyboardInterrupt:
