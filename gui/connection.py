@@ -92,6 +92,7 @@ async def _test_stdio(
     environment = os.environ.copy()
     environment.update(environment_for(config))
     environment["MCP_TRANSPORT"] = "stdio"
+    _emit(callback, f"MCP runtime: {command[0]}")
     parameters = StdioServerParameters(
         command=command[0],
         args=command[1:],

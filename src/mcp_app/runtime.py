@@ -10,16 +10,26 @@ SOURCE_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_LAUNCHER = SOURCE_ROOT / "launch_mcp.py"
 
 
+def _absolute_python(path: Path) -> Path:
+    """Absolute path without following symlinks.
+
+    On Linux, ``.venv/bin/python`` usually symlinks to the system interpreter.
+    ``Path.resolve()`` follows that link and drops the venv's site-packages, so
+    child processes lose packages such as ``mcp``.
+    """
+    return Path(os.path.abspath(os.path.expanduser(str(path))))
+
+
 def resolve_runtime_python(python: str | Path | None = None) -> Path:
     """Prefer the project virtualenv when launching MCP child processes."""
     if python is not None:
-        return Path(python).expanduser().resolve()
+        return _absolute_python(Path(python))
     venv_python = SOURCE_ROOT / ".venv" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
     if venv_python.is_file():
-        return venv_python.resolve()
-    return Path(sys.executable).resolve()
+        return _absolute_python(venv_python)
+    return _absolute_python(Path(sys.executable))
 
 
 def launcher_command(
@@ -30,5 +40,5 @@ def launcher_command(
     executable = str(resolve_runtime_python(python))
     launcher = SOURCE_LAUNCHER if source_launcher is None else source_launcher
     if launcher.is_file():
-        return [executable, str(launcher.resolve())]
+        return [executable, str(_absolute_python(launcher))]
     return [executable, "-m", "mcp_app.launcher"]

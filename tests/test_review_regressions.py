@@ -35,6 +35,22 @@ def test_installed_layout_uses_packaged_launcher(tmp_path: Path) -> None:
     assert command[1:] == ["-m", "mcp_app.launcher"]
 
 
+def test_runtime_python_stays_inside_venv(tmp_path: Path, monkeypatch) -> None:
+    """Linux venv pythons are symlinks; following them drops site-packages."""
+    import os
+
+    from mcp_app import runtime as rt
+
+    project = tmp_path / "project"
+    venv_python = project / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(rt, "SOURCE_ROOT", project)
+    chosen = rt.resolve_runtime_python()
+    assert chosen == Path(os.path.abspath(str(venv_python)))
+    assert ".venv" in chosen.as_posix()
+
+
 def test_proxy_wildcard_configuration_is_supported(tmp_path: Path) -> None:
     _git_init(tmp_path)
     config = AppConfig(
