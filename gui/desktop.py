@@ -50,6 +50,7 @@ class LocalRepoMCPApp(BaseApplication):
         self._connection_attempt = False
         self.current_page = "home"
         self.busy = False
+        self._busy_buttons: list = []
         self.last_test: dict | None = None
         self.api_key_visible = False
         self.token_visible = False
@@ -77,6 +78,7 @@ class LocalRepoMCPApp(BaseApplication):
 
     def _show_page(self, page: str) -> None:
         log_workspace.cancel(self)
+        self._busy_buttons = []
         self.current_page = page
         for key, button in self.nav_buttons.items():
             active = key == page

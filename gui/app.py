@@ -97,6 +97,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self.tunnel = TunnelManager(self.processes)
         self.current_page = "home"
         self.busy = False
+        self._busy_buttons: list = []
         self.last_test: dict | None = None
         self.api_key_visible = False
         self.token_visible = False
@@ -370,6 +371,7 @@ class LocalRepoMCPApp(ctk.CTk):
         self._cancel_tunnel_watch()
         self._api_key_entry = None
         self._api_key_toggle_btn = None
+        self._busy_buttons = []
         self.current_page = page
         for key, button in self.nav_buttons.items():
             active = key == page
@@ -623,17 +625,64 @@ class LocalRepoMCPApp(ctk.CTk):
         return entry, button
 
     def _primary_button(self, parent, text: str, command: Callable, *, danger: bool = False):
-        return ctk.CTkButton(
+        idle_fg = COLORS["danger"] if danger else COLORS["primary"]
+        idle_hover = COLORS["danger_hover"] if danger else COLORS["primary_hover"]
+        idle_text_color = "#FFFFFF" if danger else COLORS["primary_text"]
+        busy = self.busy
+        # Busy look: gray fill + body text (high contrast). Avoid CTk
+        # state=disabled — it washes text to gray-on-gray and becomes unreadable.
+        button = ctk.CTkButton(
             parent,
-            text=text,
+            text=self.t("starting") if busy else text,
             height=BTN_HEIGHT,
             corner_radius=CONTROL_RADIUS,
-            fg_color=COLORS["danger"] if danger else COLORS["primary"],
-            hover_color=COLORS["danger_hover"] if danger else COLORS["primary_hover"],
-            text_color="#FFFFFF" if danger else COLORS["primary_text"],
+            fg_color=COLORS["surface_hover"] if busy else idle_fg,
+            hover_color=COLORS["surface_hover"] if busy else idle_hover,
+            text_color=COLORS["text"] if busy else idle_text_color,
             font=ctk.CTkFont(size=FONT_BODY, weight="bold"),
-            command=command,
+            command=(lambda: None) if busy else command,
         )
+        self._busy_buttons.append(
+            {
+                "widget": button,
+                "idle_text": text,
+                "idle_fg": idle_fg,
+                "idle_hover": idle_hover,
+                "idle_text_color": idle_text_color,
+                "idle_command": command,
+            }
+        )
+        return button
+
+    def _set_busy(self, busy: bool, *, label: str | None = None) -> None:
+        self.busy = busy
+        busy_text = label or self.t("starting")
+        living: list[dict] = []
+        for item in self._busy_buttons:
+            button = item["widget"]
+            try:
+                if not button.winfo_exists():
+                    continue
+                if busy:
+                    button.configure(
+                        text=busy_text,
+                        fg_color=COLORS["surface_hover"],
+                        hover_color=COLORS["surface_hover"],
+                        text_color=COLORS["text"],
+                        command=lambda: None,
+                    )
+                else:
+                    button.configure(
+                        text=item["idle_text"],
+                        fg_color=item["idle_fg"],
+                        hover_color=item["idle_hover"],
+                        text_color=item["idle_text_color"],
+                        command=item["idle_command"],
+                    )
+                living.append(item)
+            except Exception:
+                continue
+        self._busy_buttons = living
 
     def _secondary_button(self, parent, text: str, command: Callable):
         return ctk.CTkButton(
@@ -1333,6 +1382,7 @@ class LocalRepoMCPApp(ctk.CTk):
                 lambda: self.processes.start_http(cfg),
                 self.t("running"),
                 rebuild=True,
+                busy_label=self.t("starting_http"),
             )
 
     def _stop_http(self) -> None:
@@ -1340,6 +1390,7 @@ class LocalRepoMCPApp(ctk.CTk):
             self.processes.mcp.stop,
             self.t("stopped"),
             rebuild=True,
+            busy_label=self.t("stopping_http"),
         )
 
     def _run_smoke_test(self) -> None:
@@ -1360,6 +1411,7 @@ class LocalRepoMCPApp(ctk.CTk):
                 cfg, log_callback=self.processes.mcp.append_log
             ),
             on_success=success,
+            busy_label=self.t("connecting"),
         )
 
     def _start_tunnel(self) -> None:
@@ -1369,6 +1421,7 @@ class LocalRepoMCPApp(ctk.CTk):
                 lambda: self.tunnel.start(cfg),
                 self.t("tunnel_connected"),
                 rebuild=True,
+                busy_label=self.t("starting_tunnel"),
             )
 
     def _stop_tunnel(self) -> None:
@@ -1376,6 +1429,7 @@ class LocalRepoMCPApp(ctk.CTk):
             self.processes.tunnel.stop,
             self.t("stopped"),
             rebuild=True,
+            busy_label=self.t("stopping_tunnel"),
         )
 
     def _background(
@@ -1385,11 +1439,13 @@ class LocalRepoMCPApp(ctk.CTk):
         *,
         on_success: Callable | None = None,
         rebuild: bool = False,
+        busy_label: str | None = None,
     ) -> None:
         if self.busy:
             return
-        self.busy = True
-        self._status(self.t("starting"), "working")
+        label = busy_label or self.t("starting")
+        self._set_busy(True, label=label)
+        self._status(label, "working")
 
         def worker():
             try:
@@ -1405,7 +1461,7 @@ class LocalRepoMCPApp(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _failed(self, error: str) -> None:
-        self.busy = False
+        self._set_busy(False)
         self._status(self.t("error"), "danger")
         show_result_dialog(
             self,
@@ -1417,7 +1473,7 @@ class LocalRepoMCPApp(ctk.CTk):
         )
 
     def _succeeded(self, result, message, callback, rebuild) -> None:
-        self.busy = False
+        self._set_busy(False)
         if callback:
             callback(result)
         elif message:

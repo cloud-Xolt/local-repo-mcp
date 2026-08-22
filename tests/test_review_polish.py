@@ -32,6 +32,16 @@ def test_mtls_readiness_never_falls_back_to_tcp_only() -> None:
     assert "def restart_http" not in source
 
 
+def test_primary_actions_disable_while_busy() -> None:
+    app_source = (ROOT / "gui/app.py").read_text(encoding="utf-8")
+    assert "def _set_busy(self, busy: bool" in app_source
+    assert 'fg_color=COLORS["surface_hover"]' in app_source
+    assert 'text_color=COLORS["text"]' in app_source
+    assert 'busy_label=self.t("starting_tunnel")' in app_source
+    i18n = (ROOT / "gui/i18n.py").read_text(encoding="utf-8")
+    assert '"starting_tunnel": "正在启动…"' in i18n
+
+
 def test_systemd_example_matches_wildcard_public_url_requirement() -> None:
     source = (ROOT / "systemd/mcp.env.example").read_text(encoding="utf-8")
     assert "HTTP_HOST=0.0.0.0" in source
